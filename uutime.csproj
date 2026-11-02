@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>uutime</AssemblyName>
+    <RootNamespace>UuTime</RootNamespace>
+    <Version>1.0.1</Version>
+    <Product>uutime</Product>
+    <Description>应用使用时间</Description>
+    <ApplicationIcon>uutime.ico</ApplicationIcon>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <!-- 界面全用代码写，不用设计器，不需要设计器序列化 -->
+    <NoWarn>$(NoWarn);WFO1000</NoWarn>
+    <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
+
+    <!-- 低占用：工作站 GC、关闭后台并发 GC、积极回收内存 -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <TieredCompilation>true</TieredCompilation>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="7" />
+  </ItemGroup>
+
+</Project>

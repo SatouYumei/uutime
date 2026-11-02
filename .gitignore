@@ -1,0 +1,8 @@
+bin/
+obj/
+build/
+dist/
+preview/
+.vs/
+*.user
+*.lnk

@@ -31,4 +31,12 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 
 版本号在 `uutime.csproj` 的 `<Version>`，安装包输出到 `dist\`。
 
+发布新版本（版本号加一、打包、算 SHA-256、打 tag、创建 GitHub Release）：
+
+```bash
+powershell -ExecutionPolicy Bypass -File release.ps1 -Notes "更新说明"
+```
+
+uutime 平时不联网。点侧边栏的「检查更新」才去 Releases 看最新版本；有新版本时按钮变成「更新」，再点才下载、校验 SHA-256，然后静默安装并重新启动。
+
 设置环境变量 `UUTIME_DATA` 可以把数据目录指到别处，方便测试。

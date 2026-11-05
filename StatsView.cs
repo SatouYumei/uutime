@@ -35,6 +35,7 @@ internal sealed class StatsView : Flat
         if (mode != Mode.Overview) scroll = 0;
         mode = Mode.Overview;
         rows = data;
+        BuildColors();
         ClampScroll();
         Invalidate();
     }
@@ -47,61 +48,160 @@ internal sealed class StatsView : Flat
         Invalidate();
     }
 
-    // ───── 总览 ─────
+    // ───── 总览：左边前台占比环形图，右边按前台时间排行 ─────
 
-    int CardH => S(86);
-    int Gap => S(10);
+    static readonly Color[] Palette =
+    [
+        Color.FromArgb(0x7F, 0x77, 0xDD), Color.FromArgb(0xE0, 0x7B, 0x4F), Color.FromArgb(0xD4, 0x53, 0x7E),
+        Color.FromArgb(0xE0, 0xA4, 0x3A), Color.FromArgb(0x4C, 0x9B, 0xE8), Color.FromArgb(0x6B, 0xB2, 0x4A),
+        Color.FromArgb(0x2B, 0xB5, 0xA8),
+    ];
+    const int Colored = 7; // 前 7 名单独配色，后面的统一灰色
+
+    Color[] sliceColors = [];
+
+    /// <summary>第一名用主题色，其余从调色板里挑和主题色不太像的。</summary>
+    void BuildColors()
+    {
+        var picks = new List<Color> { T.Accent };
+        foreach (var c in Palette)
+            if (Math.Abs(c.R - T.Accent.R) + Math.Abs(c.G - T.Accent.G) + Math.Abs(c.B - T.Accent.B) > 90) picks.Add(c);
+        var rest = Theme.Mix(T.Muted, T.Card, 0.6f);
+        sliceColors = rows.Select((r, i) => r.Fg <= 0 ? T.Border : i < Math.Min(Colored, picks.Count) ? picks[i] : rest).ToArray();
+    }
+
+    int PanelW => Width >= S(600) ? S(260) : S(220);
+    int ListX => PanelW + S(20);
     int ListTop => S(30);
+    int RowH => S(58);
 
-    Rectangle CardRect(int i) => new(0, ListTop + i * (CardH + Gap) - scroll, Width, CardH);
+    Rectangle RowRect(int i) => new(ListX, ListTop + i * RowH - scroll, Width - ListX, RowH);
 
     void ClampScroll()
     {
-        int content = ListTop + rows.Count * (CardH + Gap);
+        int content = ListTop + rows.Count * RowH;
         scroll = Math.Clamp(scroll, 0, Math.Max(0, content - Height));
     }
 
+    (float cx, float cy, float d, float ring) Donut()
+    {
+        int ph = PanelH;
+        float d = Math.Max(S(80), Math.Min(PanelW - S(60), ph - S(124)));
+        return (PanelW / 2f, S(24) + d / 2, d, S(22));
+    }
+
+    int PanelH => Math.Min(Height, S(360));
+
     void DrawOverview(Graphics g)
     {
-        DrawLegend(g, new Rectangle(0, 0, Width, S(20)), alignRight: false);
+        long totalFg = rows.Sum(r => r.Fg);
+        var panel = new Rectangle(0, 0, PanelW, PanelH);
+        Gfx.FillRound(g, T.Card, panel, S(12));
 
-        long max = Math.Max(1, rows.Max(r => r.Fg + r.Bg));
+        // 环
+        var (cx, cy, d, ring) = Donut();
+        var box = new RectangleF(cx - d / 2 + ring / 2, cy - d / 2 + ring / 2, d - ring, d - ring);
+        using (var track = new Pen(T.Input, ring))
+            g.DrawEllipse(track, box);
+        if (totalFg > 0)
+        {
+            int slices = rows.Count(r => r.Fg > 0);
+            float gap = slices > 1 ? 1.4f : 0, start = -90;
+            for (int i = 0; i < rows.Count && rows[i].Fg > 0; i++)
+            {
+                float sweep = 360f * rows[i].Fg / totalFg;
+                bool hot = i == hoverRow;
+                var color = hoverRow >= 0 && !hot ? Theme.Mix(sliceColors[i], T.Card, 0.4f) : sliceColors[i];
+                using var pen = new Pen(color, hot ? ring + S(6) : ring);
+                if (sweep - gap > 0.4f) g.DrawArc(pen, box, start + gap / 2, sweep - gap);
+                start += sweep;
+            }
+        }
+
+        // 环中间：默认显示前台合计，悬停某个应用时显示它的
+        var hoverApp = hoverRow >= 0 && hoverRow < rows.Count ? rows[hoverRow] : null;
+        string big = Fmt.Duration(hoverApp?.Fg ?? totalFg);
+        string small = hoverApp == null ? "前台合计" : totalFg > 0 ? $"{hoverApp.Name} · {Pct(hoverApp.Fg, totalFg)}" : hoverApp.Name;
+        int inner = (int)(d - ring * 2 - S(16));
+        Gfx.Text(g, big, K.H2, T.Text, new Rectangle((int)(cx - inner / 2f), (int)cy - S(20), inner, S(26)), TextFormatFlags.HorizontalCenter);
+        Gfx.Text(g, small, K.Small, T.Muted, new Rectangle((int)(cx - inner / 2f), (int)cy + S(8), inner, S(18)), TextFormatFlags.HorizontalCenter);
+
+        // 环下面两行小结。不放各应用后台时间的加总：几个应用同时开着时会重复计算，能加出超过 24 小时
+        int y = (int)(cy + d / 2) + S(18), px = S(22), pw = PanelW - px * 2;
+        int used = rows.Count(r => r.Fg > 0);
+        var top = rows.Count > 0 && rows[0].Fg > 0 ? rows[0].Name : "—";
+        foreach (var (label, value) in new[] { ("用得最多", top), ("用过的应用", $"{used} / {rows.Count} 个") })
+        {
+            if (y + S(22) > panel.Bottom - S(8)) break;
+            int lw = Gfx.Measure(label, K.Small).Width + S(12);
+            Gfx.Text(g, label, K.Small, T.Muted, new Rectangle(px, y, pw, S(22)));
+            Gfx.Text(g, value, K.Body, T.Text, new Rectangle(px + lw, y, pw - lw, S(22)), TextFormatFlags.Right);
+            y += S(28);
+        }
+
+        // 右边排行
+        Gfx.Text(g, "按前台时间排序", K.Small, T.Muted, new Rectangle(ListX + S(4), 0, Width - ListX, S(20)));
         var clip = g.Clip;
-        g.SetClip(new Rectangle(0, ListTop - S(4), Width, Height));
+        g.SetClip(new Rectangle(ListX, ListTop - S(2), Width - ListX, Height));
+        using var sep = new SolidBrush(T.Border);
         for (int i = 0; i < rows.Count; i++)
         {
-            var r = CardRect(i);
+            var r = RowRect(i);
             if (r.Bottom < 0 || r.Top > Height) continue;
             var row = rows[i];
-            Gfx.FillRound(g, T.Card, r, S(12));
-            if (i == hoverRow) Gfx.StrokeRound(g, Theme.Mix(T.Accent, T.Card, 0.55f), r, S(12), Math.Max(1, S(1.5f)));
+            if (i == hoverRow) Gfx.FillRound(g, T.Card, new Rectangle(r.X, r.Y + S(2), r.Width, r.Height - S(4)), S(10));
+            else if (i > 0 && i - 1 != hoverRow) g.FillRectangle(sep, r.X + S(12), r.Y, r.Width - S(24), 1);
 
-            int pad = S(18);
-            K.DrawApp(g, row.Name, row.Path, new Rectangle(r.X + pad, r.Y + S(16), S(30), S(30)));
-            int tx = r.X + pad + S(44);
-            string total = Fmt.Duration(row.Fg + row.Bg);
-            int totalW = Gfx.Measure(total, K.H2).Width;
-            Gfx.Text(g, total, K.H2, T.Text, new Rectangle(r.Right - pad - totalW, r.Y + S(12), totalW + S(2), S(26)));
-            Gfx.Text(g, row.Name, K.BodyBold, T.Text, new Rectangle(tx, r.Y + S(13), r.Right - pad - totalW - tx - S(12), S(20)));
+            float dot = S(10);
+            Gfx.FillRound(g, sliceColors[i], new RectangleF(r.X + S(12), r.Y + (r.Height - dot) / 2, dot, dot), dot / 2);
+            K.DrawApp(g, row.Name, row.Path, new Rectangle(r.X + S(32), r.Y + (r.Height - S(28)) / 2, S(28), S(28)));
 
-            string sub = $"前台 {Fmt.Duration(row.Fg)}   ·   后台 {Fmt.Duration(row.Bg)}";
-            Gfx.Text(g, sub, K.Small, T.Muted, new Rectangle(tx, r.Y + S(35), r.Width, S(16)));
-            var (state, stateInk) = row.State switch
+            string fg = row.Fg > 0 ? Fmt.Duration(row.Fg) : "—";
+            int fw = Math.Max(Gfx.Measure(fg, K.BodyBold).Width, S(40));
+            int tx = r.X + S(72), tw = r.Right - S(14) - fw - S(12) - tx;
+            Gfx.Text(g, row.Name, K.BodyBold, T.Text, new Rectangle(tx, r.Y + S(9), tw, S(20)));
+            var (state, ink) = row.State switch
             {
-                1 => ("● 正在使用", T.Accent),
-                2 => ("○ 后台运行中", T.Muted),
-                _ => ("未运行", Theme.Mix(T.Muted, T.Card, 0.7f)),
+                1 => ("  ·  正在使用", T.Accent),
+                2 => ("  ·  后台运行中", T.Muted),
+                _ => ("", T.Muted),
             };
-            int sw = Gfx.Measure(state, K.Small).Width;
-            Gfx.Text(g, state, K.Small, stateInk, new Rectangle(r.Right - pad - sw, r.Y + S(38), sw + S(2), S(16)));
+            string bg = $"后台 {Fmt.Duration(row.Bg)}";
+            int bw = Gfx.Measure(bg, K.Small).Width;
+            Gfx.Text(g, bg, K.Small, T.Muted, new Rectangle(tx, r.Y + S(31), Math.Min(bw + S(2), tw), S(17)));
+            if (state.Length > 0 && bw < tw)
+                Gfx.Text(g, state, K.Small, ink, new Rectangle(tx + bw, r.Y + S(31), tw - bw, S(17)));
 
-            var bar = new RectangleF(tx, r.Y + S(62), r.Right - pad - tx, S(7));
-            Gfx.FillRound(g, T.Input, bar, bar.Height / 2);
-            float fgW = bar.Width * row.Fg / max, allW = bar.Width * (row.Fg + row.Bg) / max;
-            if (allW >= 1) Gfx.FillRound(g, T.AccentSoft, new RectangleF(bar.X, bar.Y, Math.Max(allW, bar.Height), bar.Height), bar.Height / 2);
-            if (fgW >= 1) Gfx.FillRound(g, T.Accent, new RectangleF(bar.X, bar.Y, Math.Max(fgW, bar.Height), bar.Height), bar.Height / 2);
+            Gfx.Text(g, fg, K.BodyBold, row.Fg > 0 ? T.Text : T.Muted, new Rectangle(r.Right - S(14) - fw, r.Y + S(9), fw, S(20)), TextFormatFlags.Right);
+            string pct = row.Fg > 0 ? Pct(row.Fg, totalFg) : "";
+            Gfx.Text(g, pct, K.Small, T.Muted, new Rectangle(r.Right - S(14) - fw, r.Y + S(31), fw, S(17)), TextFormatFlags.Right);
         }
         g.Clip = clip;
+    }
+
+    static string Pct(long part, long total)
+    {
+        if (total <= 0) return "";
+        double p = part * 100.0 / total;
+        return p < 1 ? "<1%" : $"{p:0}%";
+    }
+
+    /// <summary>鼠标在环上时，算出指着第几块。</summary>
+    int SliceAt(Point p)
+    {
+        long total = rows.Sum(r => r.Fg);
+        if (total <= 0) return -1;
+        var (cx, cy, d, ring) = Donut();
+        double dx = p.X - cx, dy = p.Y - cy, dist = Math.Sqrt(dx * dx + dy * dy);
+        if (dist > d / 2 + S(4) || dist < d / 2 - ring - S(4)) return -1;
+        double angle = (Math.Atan2(dy, dx) * 180 / Math.PI + 90 + 360) % 360;
+        double acc = 0;
+        for (int i = 0; i < rows.Count && rows[i].Fg > 0; i++)
+        {
+            acc += 360.0 * rows[i].Fg / total;
+            if (angle < acc) return i;
+        }
+        return -1;
     }
 
     void DrawLegend(Graphics g, Rectangle r, bool alignRight)
@@ -267,9 +367,15 @@ internal sealed class StatsView : Flat
     {
         int row = -1, bar = -1;
         bool add = false;
-        if (mode == Mode.Overview && e.Y >= ListTop)
-            for (int i = 0; i < rows.Count; i++)
-                if (CardRect(i).Contains(e.Location)) { row = i; break; }
+        if (mode == Mode.Overview)
+        {
+            if (e.X >= ListX && e.Y >= ListTop)
+            {
+                for (int i = 0; i < rows.Count; i++)
+                    if (RowRect(i).Contains(e.Location)) { row = i; break; }
+            }
+            else if (e.X < PanelW) row = SliceAt(e.Location);
+        }
         if (mode == Mode.App && series.Length > 0 && e.X >= plot.X && e.X < plot.Right && e.Y >= plot.Y - S(6) && e.Y < plot.Bottom + S(30))
             bar = (int)((e.X - plot.X) / (plot.Width / (float)series.Length));
         if (mode == Mode.Empty) add = addRect.Contains(e.Location);

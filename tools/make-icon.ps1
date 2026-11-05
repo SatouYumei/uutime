@@ -1,27 +1,36 @@
-﻿# 生成 uutime.ico（多尺寸 PNG 帧），图案和托盘图标一致：蓝色圆盘 + 白色时针分针。
-param([string]$Out = (Join-Path $PSScriptRoot "..\uutime.ico"))
+﻿# 用 avatar.png 生成 uutime.ico（多尺寸 PNG 帧）：整张头像裁成圆形，边缘抗锯齿。
+param(
+    [string]$Avatar = (Join-Path $PSScriptRoot "..\avatar.png"),
+    [string]$Out = (Join-Path $PSScriptRoot "..\uutime.ico")
+)
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Drawing
 
+$src = [System.Drawing.Image]::FromFile([IO.Path]::GetFullPath($Avatar))
 $sizes = 16, 20, 24, 32, 40, 48, 64, 128, 256
 $frames = foreach ($s in $sizes) {
+    # 先高质量缩放，再用纹理画刷填圆，圆边才是抗锯齿的
+    $scaled = New-Object System.Drawing.Bitmap $s, $s
+    $g = [System.Drawing.Graphics]::FromImage($scaled)
+    $g.InterpolationMode = "HighQualityBicubic"
+    $g.PixelOffsetMode = "HighQuality"
+    $g.DrawImage($src, 0, 0, $s, $s)
+    $g.Dispose()
+
     $bmp = New-Object System.Drawing.Bitmap $s, $s
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $g.SmoothingMode = "AntiAlias"
     $g.PixelOffsetMode = "HighQuality"
-    $u = $s / 32.0
-    $fill = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(0x3B, 0x82, 0xF6))
-    $g.FillEllipse($fill, 1 * $u, 1 * $u, 30 * $u, 30 * $u)
-    $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White), ([Math]::Max(1.5, 3.2 * $u))
-    $pen.StartCap = "Round"; $pen.EndCap = "Round"
-    $g.DrawLine($pen, 16 * $u, 16 * $u, 16 * $u, 7 * $u)
-    $g.DrawLine($pen, 16 * $u, 16 * $u, 23 * $u, 20 * $u)
-    $g.Dispose()
+    $brush = New-Object System.Drawing.TextureBrush $scaled
+    $g.FillEllipse($brush, 0, 0, $s, $s)
+    $g.Dispose(); $brush.Dispose(); $scaled.Dispose()
+
     $ms = New-Object System.IO.MemoryStream
     $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
     $bmp.Dispose()
     , @($s, $ms.ToArray())
 }
+$src.Dispose()
 
 $buf = New-Object System.IO.MemoryStream   # 注意：PowerShell 变量不分大小写，别和 $Out 重名
 $w = New-Object System.IO.BinaryWriter $buf

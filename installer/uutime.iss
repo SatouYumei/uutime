@@ -6,6 +6,7 @@
 #endif
 #define AppName "uutime"
 #define AppExe "uutime.exe"
+#define AppMutexName "Local\uutime.single"
 
 [Setup]
 AppId={{5E2B9C61-3F4A-4D8E-A1B7-7C0D2E9F4A11}
@@ -27,7 +28,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 ; 安装/卸载前提示关闭正在运行的 uutime（程序里的单实例互斥量）
-AppMutex=Local\uutime.single
+AppMutex={#AppMutexName}
 CloseApplications=yes
 
 [Languages]
@@ -50,6 +51,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "启动 uutime"; Flags: nowait postinstall skipifsilent
+; 程序内自动更新是静默安装，装完在托盘里重新启动
+Filename: "{app}\{#AppExe}"; Parameters: "--tray --updated"; Flags: nowait; Check: IsAutoUpdate
 
 [Code]
 function DesktopRuntimeInstalled: Boolean;
@@ -61,11 +64,26 @@ begin
     FindClose(Rec);
 end;
 
+function IsAutoUpdate: Boolean;
+begin
+  Result := ExpandConstant('{param:UPDATE|0}') = '1';
+end;
+
 function InitializeSetup: Boolean;
 var
-  ErrorCode: Integer;
+  ErrorCode, Waited: Integer;
 begin
   Result := True;
+  // 自动更新时 uutime 刚开始退出，等它真正退出（最多 20 秒）
+  if IsAutoUpdate then
+  begin
+    Waited := 0;
+    while CheckForMutexes('{#AppMutexName}') and (Waited < 20000) do
+    begin
+      Sleep(250);
+      Waited := Waited + 250;
+    end;
+  end;
   if DesktopRuntimeInstalled then
     Exit;
   MsgBox('uutime 需要 .NET 10 桌面运行时（Windows Desktop Runtime x64）。' + #13#10 + #13#10 +

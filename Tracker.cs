@@ -71,7 +71,7 @@ internal sealed class Tracker : IDisposable
         lastTick = now;
         if (dt <= 0 || dt > MaxGapMs || store.Watched.Count == 0) return;
 
-        int idleMin = store.Config.IdleMinutes;
+        int idleMin = store.Settings.IdleMinutes;
         long limit = idleMin * 60_000L;
         bool active = idleMin <= 0 || Native.IdleMilliseconds() < limit || now - lastPadInput < limit;
 

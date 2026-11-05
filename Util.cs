@@ -5,22 +5,36 @@ namespace UuTime;
 
 internal static class AppIcon
 {
+    static Stream Resource(string name) => typeof(AppIcon).Assembly.GetManifestResourceStream(name)!;
+
+    /// <summary>程序图标（uutime.ico，由 tools\make-icon.ps1 从头像生成），按托盘小图标尺寸取帧。</summary>
     public static Icon Create()
     {
-        using var bmp = new Bitmap(32, 32);
-        using (var g = Graphics.FromImage(bmp))
+        using var s = Resource("uutime.ico");
+        return new Icon(s, SystemInformation.SmallIconSize);
+    }
+
+    /// <summary>圆形头像，边缘抗锯齿。用完要 Dispose。</summary>
+    public static Bitmap Avatar(int size)
+    {
+        using var s = Resource("avatar.png");
+        using var src = Image.FromStream(s);
+        using var scaled = new Bitmap(size, size);
+        using (var g = Graphics.FromImage(scaled))
+        {
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.DrawImage(src, 0, 0, size, size);
+        }
+        var round = new Bitmap(size, size);
+        using (var g = Graphics.FromImage(round))
+        using (var brush = new TextureBrush(scaled))
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            using var fill = new SolidBrush(Color.FromArgb(0x3B, 0x82, 0xF6));
-            g.FillEllipse(fill, 1, 1, 30, 30);
-            using var pen = new Pen(Color.White, 3.2f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-            g.DrawLine(pen, 16, 16, 16, 7);
-            g.DrawLine(pen, 16, 16, 23, 20);
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.FillEllipse(brush, 0, 0, size, size);
         }
-        IntPtr h = bmp.GetHicon();
-        var icon = (Icon)Icon.FromHandle(h).Clone();
-        Native.DestroyIcon(h);
-        return icon;
+        return round;
     }
 }
 

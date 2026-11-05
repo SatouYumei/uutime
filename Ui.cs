@@ -91,8 +91,14 @@ internal sealed class Kit : IDisposable
         return bmp;
     }
 
+    Bitmap? avatar;
+
+    /// <summary>标题栏用的圆形头像。</summary>
+    public Bitmap Avatar => avatar ??= UuTime.AppIcon.Avatar(S(34));
+
     public void Dispose()
     {
+        avatar?.Dispose();
         foreach (var f in new[] { Small, Body, BodyBold, H2, Title, Big, Brand }) f.Dispose();
         foreach (var b in icons.Values) b?.Dispose();
         Tip.Dispose();
@@ -161,6 +167,57 @@ internal static class Gfx
     public static Size Measure(string s, Font f) =>
         TextRenderer.MeasureText(s, f, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
 
+    public static void Star(Graphics g, Color c, float cx, float cy, float r)
+    {
+        var pts = new PointF[10];
+        for (int i = 0; i < 10; i++)
+        {
+            double a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 == 0 ? r : r * 0.45;
+            pts[i] = new PointF(cx + (float)(rr * Math.Cos(a)), cy + (float)(rr * Math.Sin(a)));
+        }
+        using var b = new SolidBrush(c);
+        g.FillPolygon(b, pts);
+    }
+
+    /// <summary>
+    /// uutime 字标：两个 u 一深一浅的主题色，time 用正文色，i 的点换成黄色星星。
+    /// 用 Segoe UI Black 的字形路径画，系统没有这个字体时退回雅黑粗体。返回占用的宽度。
+    /// </summary>
+    public static int Logo(Graphics g, Theme t, float px, float x, float midY)
+    {
+        FontFamily fam;
+        try { fam = new FontFamily("Segoe UI Black"); }
+        catch (ArgumentException) { fam = new FontFamily(Kit.FontName); }
+        using (fam)
+        {
+            var style = fam.Name == "Segoe UI Black" ? FontStyle.Regular : FontStyle.Bold;
+            using var font = new Font(fam, px, style, GraphicsUnit.Pixel);
+            var fmt = StringFormat.GenericTypographic;
+            float top = midY - px * 0.62f, start = x;
+
+            RectangleF ink = default; // 最近一次画的字形实际范围
+            float Draw(string s, Color c, float at)
+            {
+                using var path = new GraphicsPath();
+                path.AddString(s, fam, (int)style, px, new PointF(at, top), fmt);
+                ink = path.GetBounds();
+                using var b = new SolidBrush(c);
+                g.FillPath(b, path);
+                return g.MeasureString(s, font, int.MaxValue, fmt).Width;
+            }
+
+            x += Draw("u", t.Accent, x);
+            x += Draw("u", Theme.Mix(t.Accent, t.Bg, 0.55f), x - px * 0.04f) + px * 0.02f;
+            x += Draw("t", t.Text, x);
+            float iw = Draw("ı", t.Text, x); // 没有点的 i
+            float r = px * 0.2f; // 星星放在 i 的竖笔正上方，和点的位置一样
+            Star(g, Color.FromArgb(0xFF, 0xC9, 0x3C), ink.X + ink.Width / 2, ink.Top - r * 1.05f, r);
+            x += iw;
+            x += Draw("me", t.Text, x);
+            return (int)Math.Ceiling(x - start);
+        }
+    }
+
     /// <summary>线条图标，28×28 网格，画法同 chatuutts。</summary>
     public static void Icon(Graphics g, string kind, RectangleF box, Color c, bool on = false)
     {
@@ -201,6 +258,17 @@ internal static class Gfx
             case "search":
                 g.DrawEllipse(pen, R(5.5f, 5.5f, 12.5f, 12.5f));
                 g.DrawLine(pen, P(16.6f, 16.6f), P(22, 22));
+                break;
+            case "user":
+                g.DrawEllipse(pen, R(9.5f, 4.5f, 9, 9));
+                g.DrawArc(pen, R(5.5f, 15.5f, 17, 14), 180, 180);
+                break;
+            case "export": // 箭头朝上出托盘：备份
+            case "import": // 箭头朝下进托盘：导入
+                g.DrawLines(pen, [P(5.5f, 16.5f), P(5.5f, 22.5f), P(22.5f, 22.5f), P(22.5f, 16.5f)]);
+                g.DrawLine(pen, P(14, 5.5f), P(14, 17.5f));
+                if (kind == "export") g.DrawLines(pen, [P(9.5f, 10), P(14, 5.5f), P(18.5f, 10)]);
+                else g.DrawLines(pen, [P(9.5f, 13), P(14, 17.5f), P(18.5f, 13)]);
                 break;
             case "folder":
                 using (var p = new GraphicsPath())
@@ -471,8 +539,14 @@ internal enum ButtonKind { Accent, Outline, Ghost, Danger }
 
 internal sealed class TextButton : Flat
 {
-    readonly ButtonKind kind;
+    ButtonKind kind;
     readonly string? icon;
+
+    public ButtonKind Kind
+    {
+        get => kind;
+        set { kind = value; FitWidth(); Invalidate(); }
+    }
 
     public TextButton(Kit kit, Color back, string text, ButtonKind kind, string? icon = null) : base(kit, back)
     {

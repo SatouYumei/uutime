@@ -2,16 +2,18 @@ namespace UuTime;
 
 internal sealed class MainForm : ChromeForm
 {
-    static readonly string[] Ranges = ["今天", "昨天", "7 天", "30 天"];
+    static readonly string[] Ranges = ["今天", "昨天", "7 天", "30 天", "全部"];
     const int ChartDays = 14;
 
     readonly Store store;
     readonly Tracker tracker;
+    readonly Updater? updater;
     readonly System.Windows.Forms.Timer refresh = new() { Interval = 1000 };
     readonly System.Windows.Forms.Timer disarm = new() { Interval = 3000 };
 
     Kit kit = null!;
     IconButton palette = null!, minimize = null!, close = null!;
+    TextButton profileBtn = null!, updateBtn = null!;
     Surface sidebar = null!, main = null!;
     ItemList list = null!;
     TextButton addBtn = null!, removeBtn = null!;
@@ -24,15 +26,16 @@ internal sealed class MainForm : ChromeForm
     int range;
     bool removeArmed;
     string caption = "", heading = "", meta = "";
-    Rectangle autoRow, idleRow;
+    Rectangle updateRow, autoRow, idleRow;
     int dividerY;
 
     public event Action? ThemeChanged;
 
-    public MainForm(Store store, Tracker tracker, Icon icon)
+    public MainForm(Store store, Tracker tracker, Icon icon, Updater? updater = null)
     {
         this.store = store;
         this.tracker = tracker;
+        this.updater = updater;
         Icon = icon;
         Text = "uutime";
         StartPosition = FormStartPosition.CenterScreen;
@@ -80,12 +83,15 @@ internal sealed class MainForm : ChromeForm
         SuspendLayout();
         foreach (var c in Root.Controls.Cast<Control>().ToList()) c.Dispose();
         kit?.Dispose();
-        kit = new Kit(Theme.ById(store.Config.Theme), DeviceDpi);
+        kit = new Kit(Theme.ById(store.Settings.Theme), DeviceDpi);
         var t = kit.T;
         SetBack(t.Bg);
         CaptionHeight = S(56);
         MinimumSize = new Size(S(780), S(520));
 
+        profileBtn = new TextButton(kit, t.Bg, ProfileLabel(), ButtonKind.Ghost, "user");
+        profileBtn.Click += (_, _) => OpenProfiles();
+        kit.Tip.SetToolTip(profileBtn, "存档管理：切换、改名、备份、导入");
         palette = new IconButton(kit, t.Bg, "palette", "主题");
         palette.Click += (_, _) => OpenThemes();
         minimize = new IconButton(kit, t.Bg, "minus", "最小化到托盘");
@@ -101,10 +107,12 @@ internal sealed class MainForm : ChromeForm
         addBtn.Click += (_, _) => AddApps();
         autostart = new Toggle(kit, t.Sidebar) { Checked = Autostart.Enabled };
         autostart.CheckedChanged += () => Autostart.Enabled = autostart.Checked;
-        idle = new Stepper(kit, t.Sidebar, store.Config.IdleMinutes, 0, 60, v => v == 0 ? "不判定" : $"{v} 分钟");
+        updateBtn = new TextButton(kit, t.Sidebar, "检查更新", ButtonKind.Outline) { Height = S(30), Visible = updater != null };
+        updateBtn.Click += async (_, _) => await UpdateClicked();
+        idle = new Stepper(kit, t.Sidebar, store.Settings.IdleMinutes, 0, 60, v => v == 0 ? "不判定" : $"{v} 分钟");
         idle.ValueChanged += v => store.SetIdleMinutes(v);
         kit.Tip.SetToolTip(idle, "这么久没碰键鼠，前台时间就暂停（计入后台）。看视频可以设为不判定。");
-        sidebar.Controls.AddRange([list, addBtn, autostart, idle]);
+        sidebar.Controls.AddRange([list, addBtn, updateBtn, autostart, idle]);
 
         main = new Surface(t.Bg);
         main.Paint += PaintMain;
@@ -117,11 +125,12 @@ internal sealed class MainForm : ChromeForm
         removeBtn.Click += (_, _) => RemoveSelected();
         main.Controls.AddRange([seg, stats, removeBtn]);
 
-        Root.Controls.AddRange([palette, minimize, close, sidebar, main]);
+        Root.Controls.AddRange([profileBtn, palette, minimize, close, sidebar, main]);
         ApplyChrome(t);
         ResumeLayout();
         LayoutAll();
         RebuildItems();
+        SyncUpdate();
         Root.Invalidate();
     }
 
@@ -149,7 +158,7 @@ internal sealed class MainForm : ChromeForm
         int w = ClientSize.Width, h = ClientSize.Height, head = CaptionHeight;
 
         int x = w - S(12);
-        foreach (var b in new Control[] { close, minimize, palette })
+        foreach (var b in new Control[] { close, minimize, palette, profileBtn })
         {
             x -= b.Width;
             b.Location = new Point(x, (head - b.Height) / 2);
@@ -165,7 +174,9 @@ internal sealed class MainForm : ChromeForm
         autoRow = new Rectangle(0, idleRow.Y - S(42), sw, S(42));
         idle.Location = new Point(sw - S(16) - idle.Width, idleRow.Y + (idleRow.Height - idle.Height) / 2);
         autostart.Location = new Point(sw - S(18) - autostart.Width, autoRow.Y + (autoRow.Height - autostart.Height) / 2);
-        dividerY = autoRow.Y - S(8);
+        updateRow = new Rectangle(0, autoRow.Y - S(42), sw, S(42));
+        updateBtn.Location = new Point(sw - S(16) - updateBtn.Width, updateRow.Y + (updateRow.Height - updateBtn.Height) / 2);
+        dividerY = updateRow.Y - S(8);
         addBtn.Bounds = new Rectangle(S(8), dividerY - S(8) - S(42), sw - S(16), S(42));
         list.Bounds = new Rectangle(0, S(8), sw, addBtn.Top - S(12));
 
@@ -183,12 +194,12 @@ internal sealed class MainForm : ChromeForm
         var t = kit.T;
         int head = CaptionHeight;
 
-        int x = S(22);
-        int uu = Gfx.Measure("uu", kit.Brand).Width;
-        Gfx.Text(g, "uu", kit.Brand, t.Accent, new Rectangle(x, 0, uu + S(2), head));
-        int time = Gfx.Measure("time", kit.Brand).Width;
-        Gfx.Text(g, "time", kit.Brand, t.Text, new Rectangle(x + uu, 0, time + S(2), head));
-        Gfx.Text(g, "应用使用时间", kit.Small, t.Muted, new Rectangle(x + uu + time + S(12), S(4), S(160), head));
+        int x = S(18);
+        var av = kit.Avatar;
+        g.DrawImage(av, x, (head - av.Height) / 2);
+        x += av.Width + S(11);
+        x += Gfx.Logo(g, t, S(25), x, head / 2f);
+        Gfx.Text(g, "应用使用时间", kit.Small, t.Muted, new Rectangle(x + S(13), S(4), S(160), head));
 
         using var line = new SolidBrush(t.Border);
         g.FillRectangle(line, 0, head, ClientSize.Width, 1);
@@ -201,6 +212,10 @@ internal sealed class MainForm : ChromeForm
         var t = kit.T;
         using (var line = new SolidBrush(t.Border))
             g.FillRectangle(line, S(18), dividerY, sidebar.Width - S(36), 1);
+        // 版本号，检查过就换成检查结果
+        string ver = updater == null || updater.Status.Length == 0 ? $"版本 {Updater.Text(Updater.Current)}" : updater.Status;
+        var verInk = updater?.Failed == true ? t.Danger : updater?.Available != null ? t.Accent : t.Text;
+        Gfx.Text(g, ver, kit.Body, verInk, new Rectangle(S(20), updateRow.Y, updateBtn.Left - S(28), updateRow.Height));
         Gfx.Text(g, "开机自启", kit.Body, t.Text, new Rectangle(S(20), autoRow.Y, S(120), autoRow.Height));
         Gfx.Text(g, "空闲判定", kit.Body, t.Text, new Rectangle(S(20), idleRow.Y, S(100), idleRow.Height));
     }
@@ -225,6 +240,7 @@ internal sealed class MainForm : ChromeForm
             1 => (today.AddDays(-1), today.AddDays(-1)),
             2 => (today.AddDays(-6), today),
             3 => (today.AddDays(-29), today),
+            4 => (store.FirstDay(), today),
             _ => (today, today),
         };
     }
@@ -237,9 +253,9 @@ internal sealed class MainForm : ChromeForm
         if (selected != null && !store.Watched.Contains(selected)) selected = null;
         list.Items.Clear();
         list.Items.Add(new ItemList.Item { Id = "", Title = "全部应用", Glyph = "grid" });
-        if (store.Config.Apps.Count > 0)
-            list.Items.Add(new ItemList.Item { Header = true, Title = $"监控中 · {store.Config.Apps.Count}" });
-        foreach (var a in store.Config.Apps)
+        if (store.Apps.Count > 0)
+            list.Items.Add(new ItemList.Item { Header = true, Title = $"监控中 · {store.Apps.Count}" });
+        foreach (var a in store.Apps)
             list.Items.Add(new ItemList.Item { Id = a.Exe, Title = a.Name, Path = a.Path, Sub = "" });
         list.SelectedId = selected ?? "";
         LayoutAll();
@@ -250,7 +266,7 @@ internal sealed class MainForm : ChromeForm
     {
         tracker.Flush();
         var (from, to) = RangeDates();
-        var rows = store.Config.Apps.Select(a =>
+        var rows = store.Apps.Select(a =>
         {
             var (fg, bg) = store.Sum(a.Exe, from, to);
             return new StatsView.Row(a.Exe, a.Name, a.Path, fg, bg, State(a.Exe));
@@ -266,7 +282,8 @@ internal sealed class MainForm : ChromeForm
         }
         list.Invalidate();
 
-        caption = from == to ? (from == DateTime.Today ? "今天 · " : "昨天 · ") + Fmt.Day(from)
+        caption = range == 4 ? $"全部记录 · 从 {from.Year}年{from.Month}月{from.Day}日 起"
+            : from == to ? (from == DateTime.Today ? "今天 · " : "昨天 · ") + Fmt.Day(from)
             : $"{from.Month}月{from.Day}日 – {to.Month}月{to.Day}日 · {Ranges[range]}";
 
         if (rows.Count == 0)
@@ -278,13 +295,13 @@ internal sealed class MainForm : ChromeForm
         else if (selected == null)
         {
             heading = "全部应用";
-            meta = $"前台 {Fmt.Duration(rows.Sum(r => r.Fg))}   ·   后台 {Fmt.Duration(rows.Sum(r => r.Bg))}   ·   {rows.Count} 个应用";
-            stats.ShowOverview(rows.OrderByDescending(r => r.Fg + r.Bg).ThenBy(r => r.Name).ToList());
+            meta = $"前台 {Fmt.Duration(rows.Sum(r => r.Fg))}   ·   {rows.Count} 个应用   ·   存档「{store.ProfileName}」";
+            stats.ShowOverview(rows.OrderByDescending(r => r.Fg).ThenByDescending(r => r.Bg).ThenBy(r => r.Name).ToList());
         }
         else
         {
             var row = rows.First(r => r.Exe == selected);
-            var app = store.Config.Apps.First(a => a.Exe == selected);
+            var app = store.Apps.First(a => a.Exe == selected);
             heading = row.Name;
             meta = app.Path ?? app.Exe;
             var today = DateTime.Today;
@@ -357,7 +374,7 @@ internal sealed class MainForm : ChromeForm
         PreviewMode = true;
         foreach (string id in themes)
         {
-            store.Config.Theme = id;
+            store.Settings.Theme = id;
             using var f = new MainForm(store, tracker, icon)
             {
                 StartPosition = FormStartPosition.Manual,
@@ -367,9 +384,9 @@ internal sealed class MainForm : ChromeForm
             f.Show();
             Pump();
             Save(f, Path.Combine(outDir, $"{id}-overview.png"));
-            if (store.Config.Apps.Count > 0)
+            if (store.Apps.Count > 0)
             {
-                f.Select(store.Config.Apps[0].Exe);
+                f.Select(store.Apps[0].Exe);
                 Pump();
                 Save(f, Path.Combine(outDir, $"{id}-app.png"));
             }
@@ -377,6 +394,7 @@ internal sealed class MainForm : ChromeForm
             {
                 ShowDialogPreview(new ThemePicker(f.kit, id), Path.Combine(outDir, $"{id}-themes.png"));
                 ShowDialogPreview(new AddForm(f.kit, store.Watched), Path.Combine(outDir, $"{id}-add.png"));
+                ShowDialogPreview(new ProfileForm(f.kit, store, _ => { }, () => { }), Path.Combine(outDir, $"{id}-profiles.png"));
             }
             f.Close();
         }
@@ -417,15 +435,69 @@ internal sealed class MainForm : ChromeForm
     static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
 #endif
 
+    /// <summary>按钮：没检查过 / 已是最新 → 检查更新；发现新版本 → 更新。</summary>
+    async Task UpdateClicked()
+    {
+        if (updater == null || updater.Busy) return;
+        var task = updater.Available != null ? updater.UpdateAsync() : updater.CheckAsync();
+        SyncUpdate();
+        await task;
+        if (!IsDisposed) SyncUpdate();
+    }
+
+    void SyncUpdate()
+    {
+        if (updater == null) return;
+        bool has = updater.Available != null;
+        updateBtn.Text = updater.Busy ? (has ? "下载中…" : "检查中…") : has ? "更新" : "检查更新";
+        updateBtn.Kind = has ? ButtonKind.Accent : ButtonKind.Outline;
+        updateBtn.Enabled = !updater.Busy;
+        kit.Tip.SetToolTip(updateBtn, updater.Failed ? updater.Detail
+            : has ? "下载新版本并安装，装完自动重新打开" : $"当前版本 {Updater.Text(Updater.Current)}，点一下去 GitHub 看有没有新版本");
+        LayoutAll();
+        sidebar.Invalidate();
+    }
+
+    string ProfileLabel() => store.ProfileName.Length > 12 ? store.ProfileName[..11] + "…" : store.ProfileName;
+
+    void UpdateProfileButton()
+    {
+        profileBtn.Text = ProfileLabel();
+        profileBtn.FitWidth();
+        LayoutAll();
+    }
+
+    void OpenProfiles()
+    {
+        tracker.Flush();
+        store.Save();
+        using var dlg = new ProfileForm(kit, store, SwitchProfile, tracker.Flush);
+        dlg.NameChanged += UpdateProfileButton;
+        dlg.ShowDialog(this);
+        UpdateProfileButton();
+    }
+
+    /// <summary>切换存档：先把到现在为止的时间记到旧存档，再换成新存档的应用列表。</summary>
+    void SwitchProfile(string id)
+    {
+        tracker.Flush();
+        store.SwitchProfile(id);
+        tracker.Rescan();
+        selected = null;
+        Disarm();
+        RebuildItems();
+        UpdateProfileButton();
+    }
+
     void OpenThemes()
     {
         string chosen;
-        using (var picker = new ThemePicker(kit, store.Config.Theme))
+        using (var picker = new ThemePicker(kit, store.Settings.Theme))
         {
             if (picker.ShowDialog(this) != DialogResult.OK) return;
             chosen = picker.Chosen;
         }
-        if (chosen == store.Config.Theme) return;
+        if (chosen == store.Settings.Theme) return;
         store.SetTheme(chosen);
         Build();
         ThemeChanged?.Invoke();

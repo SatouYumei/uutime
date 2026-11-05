@@ -11,13 +11,17 @@ internal sealed class TrayContext : ApplicationContext
     readonly NotifyIcon tray;
     readonly ContextMenuStrip menu;
     readonly RegisteredWaitHandle showWait;
+    readonly Updater updater;
     MainForm? form;
 
-    public TrayContext(bool startHidden, EventWaitHandle showEvent)
+    void Notify(string text) => tray.ShowBalloonTip(5000, "uutime", text, ToolTipIcon.None);
+
+    public TrayContext(bool startHidden, bool updated, EventWaitHandle showEvent)
     {
         store = Store.Load();
         tracker = new Tracker(store);
         icon = AppIcon.Create();
+        string version = $"{Updater.Current.Major}.{Updater.Current.Minor}.{Updater.Current.Build}";
 
         menu = new ContextMenuStrip { Font = new Font(Kit.FontName, 9.5f), ShowImageMargin = false };
         menu.Items.Add("打开 uutime", null, (_, _) => ShowMain());
@@ -25,8 +29,11 @@ internal sealed class TrayContext : ApplicationContext
         menu.Items.Add("退出", null, (_, _) => ExitThread());
         ThemeMenu();
 
-        tray = new NotifyIcon { Icon = icon, Text = "uutime · 应用使用时间", ContextMenuStrip = menu, Visible = true };
+        tray = new NotifyIcon { Icon = icon, Text = $"uutime {version} · 应用使用时间", ContextMenuStrip = menu, Visible = true };
         tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) ShowMain(); };
+
+        updater = new Updater(ExitThread);
+        if (updated) Notify($"已更新到 {version}");
 
         // 创建控件后才有 WinForms 同步上下文
         var ui = SynchronizationContext.Current!;
@@ -42,7 +49,7 @@ internal sealed class TrayContext : ApplicationContext
 
     void ThemeMenu()
     {
-        var t = Theme.ById(store.Config.Theme);
+        var t = Theme.ById(store.Settings.Theme);
         menu.Renderer = new ToolStripProfessionalRenderer(new MenuColors(t)) { RoundedEdges = false };
         menu.BackColor = t.Card;
         foreach (ToolStripItem item in menu.Items)
@@ -76,7 +83,7 @@ internal sealed class TrayContext : ApplicationContext
     {
         if (form == null)
         {
-            form = new MainForm(store, tracker, icon);
+            form = new MainForm(store, tracker, icon, updater);
             form.ThemeChanged += ThemeMenu;
             form.FormClosed += (_, _) =>
             {

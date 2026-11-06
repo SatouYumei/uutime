@@ -38,6 +38,16 @@ internal static class AppIcon
     }
 }
 
+internal static class Links
+{
+    /// <summary>用默认浏览器打开网址。</summary>
+    public static void Open(string url)
+    {
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch (Exception) { }
+    }
+}
+
 internal static class AppInfo
 {
     /// <summary>应用的显示名：exe 文件说明，没有就用文件名。</summary>

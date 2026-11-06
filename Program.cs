@@ -33,6 +33,7 @@ internal static class Program
                 string? err = Wallpaper.Import(src, dest);
                 log.Add($"{Path.GetFileName(src)} ({new FileInfo(src).Length / 1024} KB): " +
                     (err ?? $"ok {Wallpaper.Describe(dest)} in {sw.ElapsedMilliseconds}ms"));
+                if (Environment.GetEnvironmentVariable("UUTIME_WP_KEEP") is { } keep && err == null) File.Copy(dest, keep, true);
                 File.Delete(dest);
             }
             File.WriteAllLines(args[wallpaper + 1], log);
@@ -81,8 +82,12 @@ internal static class Program
             {
                 using var http = Updater.Client();
                 var latest = Updater.LatestAsync(http).GetAwaiter().GetResult();
-                string file = Updater.DownloadAsync(http, latest!).GetAwaiter().GetResult();
-                result = $"current={Updater.Current} latest={latest} installed={Updater.Installed} downloaded={file} size={new FileInfo(file).Length}";
+                int reports = 0; string last = "";
+                string file = Updater.DownloadAsync(http, latest!, (d, t) => { reports++; last = $"{d}/{t}"; }).GetAwaiter().GetResult();
+                string missing;
+                try { Updater.DownloadAsync(http, new Version(9, 9, 9)).GetAwaiter().GetResult(); missing = "no error?!"; }
+                catch (Exception ex) { missing = ex is HttpRequestException h ? $"Http {(int?)h.StatusCode}" : ex.GetType().Name; }
+                result = $"current={Updater.Current} latest={latest} installed={Updater.Installed} downloaded={file} size={new FileInfo(file).Length} progressReports={reports} last={last} missingVersion=[{missing}]";
             }
             catch (Exception ex) { result = "error: " + ex; }
             File.WriteAllText(args[checkupdate + 1], result);

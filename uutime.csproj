@@ -11,7 +11,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>uutime</AssemblyName>
     <RootNamespace>UuTime</RootNamespace>
-    <Version>1.3.0</Version>
+    <Version>1.3.1</Version>
     <Product>uutime</Product>
     <Description>应用使用时间</Description>
     <ApplicationIcon>uutime.ico</ApplicationIcon>

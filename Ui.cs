@@ -521,13 +521,33 @@ internal class Flat : Control
 
     protected override void OnPaint(PaintEventArgs e)
     {
-        if ((FindForm() as ChromeForm)?.Backdrop is { } b) b.Paint(e.Graphics, this, Back);
+        var backdrop = (FindForm() as ChromeForm)?.Backdrop;
+        Glass = backdrop != null;
+        if (backdrop != null) backdrop.Paint(e.Graphics, this, Back);
         else e.Graphics.Clear(Back);
         Gfx.Hq(e.Graphics);
         Draw(e.Graphics);
     }
 
     protected virtual void Draw(Graphics g) { }
+
+    /// <summary>这次绘制时窗口有背景图：实心的块画成半透明加细描边。</summary>
+    protected bool Glass { get; private set; }
+
+    /// <summary>
+    /// 画一个实心块（卡片、选中项、分段控件底等）。有背景图时 50% 透明，透出一点图片，
+    /// 再加 1px 的浅描边，免得在花哨的图上看不出块的边界；文字照常画在上面，不透明。
+    /// </summary>
+    protected void Block(Graphics g, Color c, RectangleF r, float radius, bool edge = true)
+    {
+        if (!Glass)
+        {
+            Gfx.FillRound(g, c, r, radius);
+            return;
+        }
+        Gfx.FillRound(g, Color.FromArgb(128, c), r, radius);
+        if (edge) Gfx.StrokeRound(g, T.IsDark ? Color.FromArgb(34, 255, 255, 255) : Color.FromArgb(30, 0, 0, 0), r, radius, 1);
+    }
 
     protected override void WndProc(ref Message m)
     {
@@ -701,7 +721,7 @@ internal sealed class Segmented : Flat
 
     protected override void Draw(Graphics g)
     {
-        Gfx.FillRound(g, T.Input, new RectangleF(0, 0, Width, Height), Height / 2f);
+        Block(g, T.Input, new RectangleF(0, 0, Width, Height), Height / 2f);
         int x = S(4);
         for (int i = 0; i < items.Length; i++)
         {
@@ -915,12 +935,12 @@ internal sealed class ItemList : Flat
         bool sel = item.Id == SelectedId;
         if (sel)
         {
-            Gfx.FillRound(g, T.Selected, r, S(8));
+            Block(g, T.Selected, r, S(8));
             Gfx.FillRound(g, T.Accent, new RectangleF(r.X, r.Y + S(12), S(3), r.Height - S(24)), S(1.5f));
         }
         else if (hot)
         {
-            Gfx.FillRound(g, T.Hover, r, S(8));
+            Block(g, T.Hover, r, S(8), edge: false);
         }
 
         int icon = S(24);

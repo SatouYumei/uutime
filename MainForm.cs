@@ -230,6 +230,14 @@ internal sealed class MainForm : ChromeForm
         string ver = updater == null || updater.Status.Length == 0 ? $"版本 {Updater.Text(Updater.Current)}" : updater.Status;
         var verInk = updater?.Failed == true ? t.Danger : updater?.Available != null ? t.Accent : t.Text;
         Gfx.Text(g, ver, kit.Body, verInk, new Rectangle(S(20), updateRow.Y, updateBtn.Left - S(28), updateRow.Height));
+        if (updater is { Progress: >= 0 })
+        {
+            // 下载进度条，贴在这一行底部
+            var bar = new RectangleF(S(20), updateRow.Bottom - S(5), sidebar.Width - S(40), S(4));
+            Gfx.FillRound(g, t.Input, bar, bar.Height / 2);
+            float w = (float)(bar.Width * updater.Progress);
+            if (w >= 1) Gfx.FillRound(g, t.Accent, new RectangleF(bar.X, bar.Y, Math.Max(w, bar.Height), bar.Height), bar.Height / 2);
+        }
         if (autoRow.Height > 0) Gfx.Text(g, "自动监控", kit.Body, t.Text, new Rectangle(S(20), autoRow.Y, S(120), autoRow.Height));
     }
 
@@ -395,7 +403,8 @@ internal sealed class MainForm : ChromeForm
         foreach (string id in themes)
         {
             store.Prefs.Theme = id;
-            using var f = new MainForm(store, tracker, icon)
+            using var updater = new Updater(() => { }, () => false, _ => { });
+            using var f = new MainForm(store, tracker, icon, updater)
             {
                 StartPosition = FormStartPosition.Manual,
                 Location = new Point(-30000, -30000),
@@ -412,6 +421,13 @@ internal sealed class MainForm : ChromeForm
             }
             if (id == themes[0])
             {
+                // 更新的几种状态：下载中、下载失败（引导去 GitHub）
+                updater.Fake(new Version(9, 9, 9), "下载中 45%", false, false, 0.45, true);
+                Pump();
+                Save(f, Path.Combine(outDir, $"{id}-update-downloading.png"));
+                updater.Fake(new Version(9, 9, 9), "下载失败", true, true, -1, false);
+                Pump();
+                Save(f, Path.Combine(outDir, $"{id}-update-failed.png"));
                 ShowDialogPreview(new AppearanceForm(f.kit, store), Path.Combine(outDir, $"{id}-appearance.png"));
                 ShowDialogPreview(new ColorPickerForm(f.kit, f.kit.T.Accent, "自定义主题色"), Path.Combine(outDir, $"{id}-color.png"));
                 ShowDialogPreview(new AddForm(f.kit, store.Watched), Path.Combine(outDir, $"{id}-add.png"));
@@ -461,6 +477,12 @@ internal sealed class MainForm : ChromeForm
     async Task UpdateClicked()
     {
         if (updater == null || updater.Busy) return;
+        if (updater.ManualDownload)
+        {
+            // 自动下载走不通：打开 GitHub 下载页，让用户自己下载安装包
+            Links.Open(updater.DownloadPage);
+            return;
+        }
         var task = updater.Available != null ? updater.UpdateAsync() : updater.CheckAsync();
         SyncUpdate();
         await task;
@@ -471,10 +493,13 @@ internal sealed class MainForm : ChromeForm
     {
         if (updater == null) return;
         bool has = updater.Available != null;
-        updateBtn.Text = updater.Busy ? (has ? "下载中…" : "检查中…") : has ? "更新" : "检查更新";
-        updateBtn.Kind = has ? ButtonKind.Accent : ButtonKind.Outline;
+        updateBtn.Text = updater.Busy ? (has ? "下载中…" : "检查中…")
+            : updater.ManualDownload ? "去 GitHub 下载" : has ? "更新" : "检查更新";
+        updateBtn.Kind = has || updater.ManualDownload ? ButtonKind.Accent : ButtonKind.Outline;
         updateBtn.Enabled = !updater.Busy;
-        kit.Tip.SetToolTip(updateBtn, updater.Failed ? updater.Detail
+        kit.Tip.SetToolTip(updateBtn, updater.ManualDownload ? $"{updater.Detail}\n点这个按钮在浏览器里打开下载页"
+            : updater.Failed ? updater.Detail
+            : updater.Busy && updater.Detail.Length > 0 ? updater.Detail
             : has ? "下载新版本并安装，装完自动重新打开" : $"当前版本 {Updater.Text(Updater.Current)}，点一下去 GitHub 看有没有新版本");
         LayoutAll();
         sidebar.Invalidate();

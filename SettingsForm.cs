@@ -22,7 +22,7 @@ internal sealed class SettingsForm : ChromeForm
     readonly List<(string Section, Row[] Rows)> sections;
     readonly Toggle autoMode;
     readonly Segmented scope;
-    readonly TextButton blockAdd, done;
+    readonly TextButton blockAdd, done, link;
     readonly BlockList blockList;
     readonly List<(Rectangle Rect, Row Row)> rowRects = new();
     readonly List<(int Y, string Text)> sectionRects = new();
@@ -79,6 +79,9 @@ internal sealed class SettingsForm : ChromeForm
 
         done = new TextButton(kit, t.Bg, "完成", ButtonKind.Outline);
         done.Click += (_, _) => Close();
+        link = new TextButton(kit, t.Bg, $"uutime {Updater.Text(Updater.Current)} · github.com/SatouYumei/uutime", ButtonKind.Ghost);
+        link.Click += (_, _) => Links.Open(Updater.Repo);
+        kit.Tip.SetToolTip(link, "在浏览器打开项目主页：源码、所有版本的安装包、问题反馈");
 
         sections =
         [
@@ -97,7 +100,7 @@ internal sealed class SettingsForm : ChromeForm
             ]),
         ];
 
-        Root.Controls.AddRange([close, autostart, theme, idle, updates, autoMode, scope, showToggle, blockAdd, blockList, done]);
+        Root.Controls.AddRange([close, autostart, theme, idle, updates, autoMode, scope, showToggle, blockAdd, blockList, done, link]);
     }
 
     public override int S(float v) => kit.S(v);
@@ -141,6 +144,7 @@ internal sealed class SettingsForm : ChromeForm
         blockHead = new Rectangle(pad, y, w - pad * 2, S(36));
         blockAdd.Location = new Point(blockHead.Right - blockAdd.Width + S(10), blockHead.Y + (blockHead.Height - blockAdd.Height) / 2);
         done.Location = new Point(w - pad - done.Width, h - S(18) - done.Height);
+        link.Location = new Point(pad - S(10), done.Top + (done.Height - link.Height) / 2);
         blockList.Bounds = new Rectangle(pad - S(6), blockHead.Bottom + S(2), w - pad * 2 + S(12), done.Top - S(14) - blockHead.Bottom - S(2));
         Root.Invalidate();
     }

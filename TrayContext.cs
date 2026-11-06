@@ -46,7 +46,8 @@ internal sealed class TrayContext : ApplicationContext
         SystemEvents.SessionEnding += OnSessionEnding;
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
 
-        if (startHidden) Native.TrimWorkingSet();
+        // 刚更新完（安装程序带 --updated 启动）：打开一次主窗口，让用户看到新版本
+        if (startHidden && !updated) Native.TrimWorkingSet();
         else ShowMain();
     }
 

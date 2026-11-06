@@ -51,8 +51,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "启动 uutime"; Flags: nowait postinstall skipifsilent
-; 程序内自动更新是静默安装，装完在托盘里重新启动
-Filename: "{app}\{#AppExe}"; Parameters: "--tray --updated"; Flags: nowait; Check: IsAutoUpdate
+; 程序内更新是静默安装，装完重新启动并打开一次主窗口
+Filename: "{app}\{#AppExe}"; Parameters: "--updated"; Flags: nowait; Check: IsAutoUpdate
 
 [Code]
 function DesktopRuntimeInstalled: Boolean;

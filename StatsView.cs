@@ -100,7 +100,7 @@ internal sealed class StatsView : Flat
     {
         long totalFg = rows.Sum(r => r.Fg);
         var panel = new Rectangle(0, 0, PanelW, PanelH);
-        Gfx.FillRound(g, T.Card, panel, S(12));
+        Block(g, T.Card, panel, S(12));
 
         // 环
         var (cx, cy, d, ring) = Donut();
@@ -153,7 +153,7 @@ internal sealed class StatsView : Flat
             var r = RowRect(i);
             if (r.Bottom < 0 || r.Top > Height) continue;
             var row = rows[i];
-            if (i == hoverRow) Gfx.FillRound(g, T.Card, new Rectangle(r.X, r.Y + S(2), r.Width, r.Height - S(4)), S(10));
+            if (i == hoverRow) Block(g, T.Card, new Rectangle(r.X, r.Y + S(2), r.Width, r.Height - S(4)), S(10));
             else if (i > 0 && i - 1 != hoverRow) g.FillRectangle(sep, r.X + S(12), r.Y, r.Width - S(24), 1);
 
             float dot = S(10);
@@ -237,7 +237,7 @@ internal sealed class StatsView : Flat
         StatCard(g, new Rectangle(w + gap, 0, Width - w - gap, cardH), "后台运行", T.AccentSoft, app.Bg, $"运行合计 {Fmt.Duration(run)}", T.Text);
 
         var c = new Rectangle(0, cardH + gap, Width, Math.Max(S(200), Height - cardH - gap));
-        Gfx.FillRound(g, T.Card, c, S(12));
+        Block(g, T.Card, c, S(12));
         Gfx.Text(g, $"最近 {series.Length} 天", K.BodyBold, T.Text, new Rectangle(c.X + S(20), c.Y + S(16), S(200), S(22)));
         DrawLegend(g, new Rectangle(c.X, c.Y + S(16), c.Width - S(20), S(22)), alignRight: true);
         DrawChart(g, c);
@@ -245,7 +245,7 @@ internal sealed class StatsView : Flat
 
     void StatCard(Graphics g, Rectangle r, string label, Color dot, long ms, string note, Color ink)
     {
-        Gfx.FillRound(g, T.Card, r, S(12));
+        Block(g, T.Card, r, S(12));
         int pad = S(20);
         Gfx.FillRound(g, dot, new RectangleF(r.X + pad, r.Y + S(21), S(10), S(10)), S(3));
         Gfx.Text(g, label, K.Small, T.Muted, new Rectangle(r.X + pad + S(16), r.Y + S(16), r.Width, S(20)));
@@ -296,7 +296,7 @@ internal sealed class StatsView : Flat
         {
             var (day, fg, bg) = series[i];
             float cx = plot.X + slot * (i + 0.5f);
-            if (i == hoverBar) Gfx.FillRound(g, T.Hover, new RectangleF(cx - slot / 2 + S(2), plot.Y - S(6), slot - S(4), plot.Height + S(6)), S(6));
+            if (i == hoverBar) Block(g, T.Hover, new RectangleF(cx - slot / 2 + S(2), plot.Y - S(6), slot - S(4), plot.Height + S(6)), S(6), edge: false);
 
             float allH = plot.Height * (fg + bg) / (float)top;
             float fgH = plot.Height * fg / (float)top;

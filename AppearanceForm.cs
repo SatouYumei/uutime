@@ -10,16 +10,16 @@ internal sealed class AppearanceForm : ChromeForm
     readonly Segmented mode;
     readonly SwatchRow bases, accents;
     readonly TextButton pickImage, removeImage, reset, cancel, apply;
-    readonly Stepper dim;
+    readonly Slider baseClear, cardClear;
     readonly Preview preview;
-    Rectangle modeRow, baseHead, accentHead, imageHead, dimRow;
+    Rectangle modeRow, baseHead, accentHead, imageHead, baseClearRow, cardClearRow;
     string status = "";
     bool statusError;
 
     // 正在编辑的值（应用前不写进存档）
     bool light;
     Color? baseColor, accent;
-    int dimValue;
+    int dimValue, cardOpacity;
     string? pendingImage;   // 新选的图（已压缩好的临时文件）
     bool dropImage;         // 移除背景图
 
@@ -33,6 +33,7 @@ internal sealed class AppearanceForm : ChromeForm
         baseColor = Theme.TryParse(p.Base, out var b) ? b : null;
         accent = Theme.TryParse(p.Accent, out var a) ? a : null;
         dimValue = p.BackdropDim;
+        cardOpacity = p.CardOpacity;
 
         Text = "外观";
         ShowInTaskbar = false;
@@ -40,7 +41,7 @@ internal sealed class AppearanceForm : ChromeForm
         Resizable = false;
         SetBack(t.Bg);
         CaptionHeight = S(56);
-        Size = new Size(S(880), S(620));
+        Size = new Size(S(880), S(640));
 
         var close = new IconButton(kit, t.Bg, "close", "关闭");
         close.Click += (_, _) => DialogResult = DialogResult.Cancel;
@@ -79,9 +80,13 @@ internal sealed class AppearanceForm : ChromeForm
             SetStatus("");
             Changed();
         };
-        dim = new Stepper(kit, t.Bg, dimValue, 0, 95, v => $"{v}%", step: 5);
-        dim.ValueChanged += v => { dimValue = v; Changed(); };
-        kit.Tip.SetToolTip(dim, "盖在图片上的底色有多浓：越大图越淡，文字越清楚");
+        // 滑块显示「透明度」，存的是不透明度：越透明图越清楚，越不透明字越清楚
+        baseClear = new Slider(kit, t.Bg, 100 - dimValue, 0, 100, v => $"{v}%");
+        baseClear.ValueChanged += v => { dimValue = 100 - v; Changed(); };
+        kit.Tip.SetToolTip(baseClear, "盖在背景图上的底色有多透明：越大图越清楚，越小文字越清楚");
+        cardClear = new Slider(kit, t.Bg, 100 - cardOpacity, 0, 90, v => $"{v}%");
+        cardClear.ValueChanged += v => { cardOpacity = 100 - v; Changed(); };
+        kit.Tip.SetToolTip(cardClear, "卡片、选中项这些实心块有多透明");
 
         preview = new Preview(kit, t.Bg);
 
@@ -89,7 +94,10 @@ internal sealed class AppearanceForm : ChromeForm
         reset.Click += (_, _) =>
         {
             baseColor = accent = null;
-            dim.Value = dimValue = 72;
+            dimValue = 72;
+            cardOpacity = 50;
+            baseClear.Value = 100 - dimValue;
+            cardClear.Value = 100 - cardOpacity;
             Changed();
         };
         cancel = new TextButton(kit, t.Bg, "取消", ButtonKind.Outline);
@@ -97,7 +105,7 @@ internal sealed class AppearanceForm : ChromeForm
         apply = new TextButton(kit, t.Bg, "应用", ButtonKind.Accent);
         apply.Click += (_, _) => Apply();
 
-        Root.Controls.AddRange([close, mode, bases, accents, pickImage, removeImage, dim, preview, reset, cancel, apply]);
+        Root.Controls.AddRange([close, mode, bases, accents, pickImage, removeImage, baseClear, cardClear, preview, reset, cancel, apply]);
         LayoutAll();
         Changed();
     }
@@ -155,8 +163,10 @@ internal sealed class AppearanceForm : ChromeForm
         imageHead = new Rectangle(pad, y, left, S(26));
         pickImage.Location = new Point(pad, imageHead.Bottom + S(6));
         removeImage.Location = new Point(pickImage.Right + S(8), pickImage.Top);
-        dimRow = new Rectangle(pad, pickImage.Bottom + S(52), left, S(40));
-        dim.Location = new Point(dimRow.Right - dim.Width, dimRow.Y + (dimRow.Height - dim.Height) / 2);
+        baseClearRow = new Rectangle(pad, pickImage.Bottom + S(50), left, S(38));
+        baseClear.Location = new Point(baseClearRow.Right - baseClear.Width, baseClearRow.Y + (baseClearRow.Height - baseClear.Height) / 2);
+        cardClearRow = new Rectangle(pad, baseClearRow.Bottom, left, S(38));
+        cardClear.Location = new Point(cardClearRow.Right - cardClear.Width, cardClearRow.Y + (cardClearRow.Height - cardClear.Height) / 2);
 
         int by = ClientSize.Height - S(18) - apply.Height;
         apply.Location = new Point(ClientSize.Width - pad - apply.Width, by);
@@ -181,7 +191,8 @@ internal sealed class AppearanceForm : ChromeForm
         string line = status.Length > 0 ? status : file != null ? Wallpaper.Describe(file) : "没有背景图";
         Gfx.Text(g, line, kit.Small, statusError ? t.Danger : t.Muted, new Rectangle(S(24), pickImage.Bottom + S(6), S(380), S(20)));
         Gfx.Text(g, Wallpaper.Limits, kit.Small, t.Muted, new Rectangle(S(24), pickImage.Bottom + S(26), S(380), S(20)));
-        Gfx.Text(g, "遮罩浓度", kit.Body, file != null ? t.Text : t.Muted, dimRow);
+        Gfx.Text(g, "底色透明度", kit.Body, file != null ? t.Text : t.Muted, baseClearRow);
+        Gfx.Text(g, "卡片透明度", kit.Body, file != null ? t.Text : t.Muted, cardClearRow);
 
         using var border = new SolidBrush(t.Border);
         g.FillRectangle(border, S(24), apply.Top - S(12), ClientSize.Width - S(48), 1);
@@ -192,9 +203,9 @@ internal sealed class AppearanceForm : ChromeForm
         bases.Colors = BaseList();
         bases.Current = Bg();
         accents.Current = Current().Accent;
-        dim.Enabled = ImageFile() != null;
+        baseClear.Enabled = cardClear.Enabled = ImageFile() != null;
         removeImage.Visible = ImageFile() != null;
-        preview.Show(Current(), ImageFile(), dimValue);
+        preview.Show(Current(), ImageFile(), dimValue, cardOpacity);
         bases.Invalidate();
         accents.Invalidate();
         Root.Invalidate();
@@ -248,6 +259,7 @@ internal sealed class AppearanceForm : ChromeForm
         p.Base = baseColor is { } b ? Theme.Hex(b) : null;
         p.Accent = accent is { } a ? Theme.Hex(a) : null;
         p.BackdropDim = dimValue;
+        p.CardOpacity = cardOpacity;
         if (pendingImage != null) store.SetBackground(pendingImage);
         else if (dropImage) store.ClearBackground();
         store.SavePrefs();
@@ -259,16 +271,17 @@ internal sealed class AppearanceForm : ChromeForm
     {
         Theme? theme;
         string? file;
-        int dimPercent;
+        int dimPercent, cardPercent;
         public Bitmap? Image;
         Bitmap? cover;
 
         public Preview(Kit kit, Color back) : base(kit, back) { }
 
-        public void Show(Theme t, string? imageFile, int dim)
+        public void Show(Theme t, string? imageFile, int dim, int card)
         {
             theme = t;
             dimPercent = dim;
+            cardPercent = card;
             if (imageFile != file)
             {
                 file = imageFile;
@@ -289,6 +302,13 @@ internal sealed class AppearanceForm : ChromeForm
         protected override void Draw(Graphics g)
         {
             if (theme is not { } t) return;
+            // 和主窗口一样：有背景图时实心块按卡片透明度画，加细描边
+            void Block(Color c, RectangleF r, float radius)
+            {
+                if (Image == null) { Gfx.FillRound(g, c, r, radius); return; }
+                Gfx.FillRound(g, Color.FromArgb(cardPercent * 255 / 100, c), r, radius);
+                Gfx.StrokeRound(g, t.IsDark ? Color.FromArgb(34, 255, 255, 255) : Color.FromArgb(30, 0, 0, 0), r, radius, 1);
+            }
             var r = new Rectangle(0, 0, Width - 1, Height - 1);
             using var clip = Gfx.Round(r, S(12));
             var old = g.Clip;
@@ -328,7 +348,7 @@ internal sealed class AppearanceForm : ChromeForm
 
             // 侧边栏：选中项 + 几个应用
             var sel = new Rectangle(S(6), head + S(8), side - S(12), S(26));
-            Gfx.FillRound(g, t.Selected, sel, S(6));
+            Block(t.Selected, sel, S(6));
             Gfx.FillRound(g, t.Accent, new RectangleF(sel.X, sel.Y + S(7), S(2), sel.Height - S(14)), S(1));
             Gfx.Text(g, "全部应用", K.Small, t.Text, new Rectangle(sel.X + S(12), sel.Y, sel.Width, sel.Height));
             string[] names = ["FF14", "QQ", "Chrome", "Claude"];
@@ -345,12 +365,12 @@ internal sealed class AppearanceForm : ChromeForm
             Gfx.Text(g, "全部应用", K.BodyBold, t.Text, new Rectangle(mx, head + S(10), S(120), S(20)));
             Gfx.Text(g, "前台 5小时41分 · 6 个应用", K.Small, t.Muted, new Rectangle(mx, head + S(32), S(200), S(16)));
             var segR = new Rectangle(mainR.Right - S(110), head + S(12), S(96), S(22));
-            Gfx.FillRound(g, t.Input, segR, segR.Height / 2f);
+            Block(t.Input, segR, segR.Height / 2f);
             Gfx.FillRound(g, t.Accent, new Rectangle(segR.X + S(3), segR.Y + S(3), S(34), segR.Height - S(6)), (segR.Height - S(6)) / 2f);
             Gfx.Text(g, "今天", K.Small, t.AccentText, new Rectangle(segR.X + S(3), segR.Y, S(34), segR.Height), TextFormatFlags.HorizontalCenter);
 
             var card = new Rectangle(mx, head + S(58), S(120), Height - head - S(72));
-            Gfx.FillRound(g, t.Card, card, S(8));
+            Block(t.Card, card, S(8));
             float d = Math.Min(card.Width - S(30), S(84)), ring = S(10);
             var box = new RectangleF(card.X + (card.Width - d) / 2 + ring / 2, card.Y + S(14) + ring / 2, d - ring, d - ring);
             using (var pen = new Pen(t.Input, ring)) g.DrawEllipse(pen, box);
@@ -369,7 +389,7 @@ internal sealed class AppearanceForm : ChromeForm
             for (int i = 0; i < 4; i++)
             {
                 int y = card.Y + S(4) + i * S(34);
-                if (i == 0) Gfx.FillRound(g, t.Card, new Rectangle(lx - S(4), y, lw + S(8), S(30)), S(6));
+                if (i == 0) Block(t.Card, new Rectangle(lx - S(4), y, lw + S(8), S(30)), S(6));
                 Gfx.Disc(g, i < 3 ? slices[i] : t.Border, lx + S(4), y + S(15), S(6));
                 Gfx.Text(g, names[i], K.Small, t.Text, new Rectangle(lx + S(14), y + S(2), lw - S(60), S(14)));
                 Gfx.Text(g, "后台 2小时", K.Small, t.Muted, new Rectangle(lx + S(14), y + S(15), lw - S(60), S(14)));

@@ -523,6 +523,7 @@ internal class Flat : Control
     {
         var backdrop = (FindForm() as ChromeForm)?.Backdrop;
         Glass = backdrop != null;
+        glassAlpha = backdrop?.CardAlpha ?? 255;
         if (backdrop != null) backdrop.Paint(e.Graphics, this, Back);
         else e.Graphics.Clear(Back);
         Gfx.Hq(e.Graphics);
@@ -533,9 +534,10 @@ internal class Flat : Control
 
     /// <summary>这次绘制时窗口有背景图：实心的块画成半透明加细描边。</summary>
     protected bool Glass { get; private set; }
+    int glassAlpha = 255;
 
     /// <summary>
-    /// 画一个实心块（卡片、选中项、分段控件底等）。有背景图时 50% 透明，透出一点图片，
+    /// 画一个实心块（卡片、选中项、分段控件底等）。有背景图时按设置的卡片透明度（默认 50%）透出图片，
     /// 再加 1px 的浅描边，免得在花哨的图上看不出块的边界；文字照常画在上面，不透明。
     /// </summary>
     protected void Block(Graphics g, Color c, RectangleF r, float radius, bool edge = true)
@@ -545,7 +547,7 @@ internal class Flat : Control
             Gfx.FillRound(g, c, r, radius);
             return;
         }
-        Gfx.FillRound(g, Color.FromArgb(128, c), r, radius);
+        Gfx.FillRound(g, Color.FromArgb(glassAlpha, c), r, radius);
         if (edge) Gfx.StrokeRound(g, T.IsDark ? Color.FromArgb(34, 255, 255, 255) : Color.FromArgb(30, 0, 0, 0), r, radius, 1);
     }
 
@@ -832,6 +834,95 @@ internal sealed class Stepper : Flat
         Gfx.Icon(g, "minus", new RectangleF(S(6), y, box, box), value > min ? T.Text : T.Border);
         Gfx.Icon(g, "plus", new RectangleF(Width - S(6) - box, y, box, box), value < max ? T.Text : T.Border);
         Gfx.Text(g, format(value), K.Body, T.Text, new Rectangle(S(28), 0, Width - S(56), Height), TextFormatFlags.HorizontalCenter);
+    }
+}
+
+/// <summary>滑块：拖动或点轨道改值，右边显示当前值。</summary>
+internal sealed class Slider : Flat
+{
+    readonly int min, max;
+    readonly Func<int, string> format;
+    int value;
+    bool drag;
+
+    public event Action<int>? ValueChanged;
+
+    public Slider(Kit kit, Color back, int value, int min, int max, Func<int, string> format) : base(kit, back)
+    {
+        this.min = min;
+        this.max = max;
+        this.format = format;
+        this.value = Math.Clamp(value, min, max);
+        Size = new Size(S(240), S(30));
+        Cursor = Cursors.Hand;
+    }
+
+    public int Value
+    {
+        get => value;
+        set { this.value = Math.Clamp(value, min, max); Invalidate(); }
+    }
+
+    int LabelW => S(48);
+    float Left0 => S(9);
+    float Right0 => Width - LabelW - S(9);
+
+    void Pick(int x)
+    {
+        float k = Math.Clamp((x - Left0) / (Right0 - Left0), 0, 1);
+        int next = (int)Math.Round(min + k * (max - min));
+        if (next == value) return;
+        value = next;
+        Invalidate();
+        ValueChanged?.Invoke(value);
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Left && Enabled) { drag = true; Capture = true; Pick(e.X); }
+        base.OnMouseDown(e);
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        if (drag) Pick(e.X);
+        base.OnMouseMove(e);
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        drag = false;
+        Capture = false;
+        base.OnMouseUp(e);
+    }
+
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        if (!Enabled) return;
+        int next = Math.Clamp(value + Math.Sign(e.Delta) * Math.Max(1, (max - min) / 20), min, max);
+        if (next != value) { value = next; Invalidate(); ValueChanged?.Invoke(value); }
+        base.OnMouseWheel(e);
+    }
+
+    protected override void OnEnabledChanged(EventArgs e)
+    {
+        Cursor = Enabled ? Cursors.Hand : Cursors.Default;
+        Invalidate();
+        base.OnEnabledChanged(e);
+    }
+
+    protected override void Draw(Graphics g)
+    {
+        float cy = Height / 2f, k = (value - min) / (float)(max - min);
+        float x = Left0 + k * (Right0 - Left0);
+        var track = new RectangleF(Left0, cy - S(2), Right0 - Left0, S(4));
+        Gfx.FillRound(g, T.Input, track, S(2));
+        var fill = Enabled ? T.Accent : T.Border;
+        if (x - Left0 >= 1) Gfx.FillRound(g, fill, new RectangleF(Left0, track.Y, x - Left0, track.Height), S(2));
+        float d = S(16);
+        Gfx.Disc(g, Enabled ? T.Text : T.Border, x, cy, d);
+        Gfx.Disc(g, fill, x, cy, d - S(6));
+        Gfx.Text(g, format(value), K.Body, Enabled ? T.Text : T.Muted, new Rectangle(Width - LabelW, 0, LabelW, Height), TextFormatFlags.Right);
     }
 }
 

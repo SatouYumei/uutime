@@ -36,6 +36,8 @@ internal sealed class Prefs
     public string? Accent { get; set; }
     /// <summary>有背景图时，盖在图上的底色遮罩浓度（百分比），越大图越淡、字越清楚。</summary>
     public int BackdropDim { get; set; } = 72;
+    /// <summary>有背景图时卡片、选中项等实心块的不透明度（百分比）。</summary>
+    public int CardOpacity { get; set; } = 50;
     /// <summary>定时检查新版本并推送通知。</summary>
     public bool CheckUpdates { get; set; } = true;
     public bool AutoMode { get; set; }
@@ -47,7 +49,7 @@ internal sealed class Prefs
 
     public Prefs Clone() => new()
     {
-        IdleMinutes = IdleMinutes, Theme = Theme, Base = Base, Accent = Accent, BackdropDim = BackdropDim, CheckUpdates = CheckUpdates, AutoMode = AutoMode,
+        IdleMinutes = IdleMinutes, Theme = Theme, Base = Base, Accent = Accent, BackdropDim = BackdropDim, CardOpacity = CardOpacity, CheckUpdates = CheckUpdates, AutoMode = AutoMode,
         AutoScope = AutoScope, ShowAutoToggle = ShowAutoToggle, Blocked = new(Blocked),
     };
 }

@@ -92,7 +92,7 @@ internal sealed class MainForm : ChromeForm
         kit?.Dispose();
         kit = new Kit(Theme.From(store.Prefs), DeviceDpi);
         Backdrop?.Dispose();
-        Backdrop = Backdrop.Load(store.Background, store.Prefs.BackdropDim);
+        Backdrop = Backdrop.Load(store.Background, store.Prefs.BackdropDim, store.Prefs.CardOpacity);
         var t = kit.T;
         SetBack(t.Bg);
         CaptionHeight = S(56);

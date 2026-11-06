@@ -174,14 +174,18 @@ internal sealed class Backdrop : IDisposable
     Bitmap? cache;
     readonly int alpha;
 
-    Backdrop(Bitmap source, int dimPercent)
+    /// <summary>卡片等实心块的不透明度（0~255）。</summary>
+    public int CardAlpha { get; }
+
+    Backdrop(Bitmap source, int dimPercent, int cardPercent)
     {
         this.source = source;
         alpha = Math.Clamp(dimPercent, 0, 100) * 255 / 100;
+        CardAlpha = Math.Clamp(cardPercent, 0, 100) * 255 / 100;
     }
 
-    public static Backdrop? Load(string? file, int dimPercent) =>
-        Wallpaper.Load(file) is { } bmp ? new Backdrop(bmp, dimPercent) : null;
+    public static Backdrop? Load(string? file, int dimPercent, int cardPercent) =>
+        Wallpaper.Load(file) is { } bmp ? new Backdrop(bmp, dimPercent, cardPercent) : null;
 
     /// <summary>在控件 c 上画它所在位置的那块背景图，再盖上 tint 底色。</summary>
     public void Paint(Graphics g, Control c, Color tint)

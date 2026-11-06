@@ -21,6 +21,40 @@ internal static class Program
             MainForm.RenderPreviews(store, tracker, icon, args[render + 1], themes);
             return;
         }
+        int autotest = Array.IndexOf(args, "--autotest");
+        if (autotest >= 0)
+        {
+            // --autotest <结果文件>：在 UUTIME_DATA 的数据上打开自动监控，三种范围各扫一次，记下发现了什么、用了多久
+            var log = new List<string>();
+            var store = Store.Load();
+            log.Add($"theme={store.Prefs.Theme} idle={store.Prefs.IdleMinutes} apps(before)={store.Apps.Count}");
+            using var tracker = new Tracker(store);
+            foreach (var scope in new[] { AutoScope.Foreground, AutoScope.Windows, AutoScope.All })
+            {
+                store.Prefs.AutoMode = true;
+                store.Prefs.AutoScope = scope;
+                store.SavePrefs();
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                tracker.Rescan();
+                long firstMs = sw.ElapsedMilliseconds;
+                sw.Restart();
+                for (int i = 0; i < 20; i++) tracker.Rescan();
+                log.Add($"{scope}: first={firstMs}ms steady={sw.ElapsedMilliseconds / 20.0:0.0}ms watched={store.Watched.Count} fg={tracker.ForegroundExe}");
+            }
+            foreach (var a in store.Apps) log.Add($"  {(a.Auto ? "auto" : "manual")} {a.Exe} | {a.Name}");
+            var blockMe = store.Apps.FirstOrDefault(a => a.Auto);
+            if (blockMe != null)
+            {
+                store.SetBlocked(blockMe.Exe, true);
+                tracker.Rescan();
+                log.Add($"blocked {blockMe.Exe}: stillWatched={store.Watched.Contains(blockMe.Exe)}");
+            }
+            store.Prefs.AutoMode = false;
+            store.SavePrefs();
+            log.Add($"auto off: watched={store.Watched.Count} apps={store.Apps.Count}");
+            File.WriteAllLines(args[autotest + 1], log);
+            return;
+        }
         int checkupdate = Array.IndexOf(args, "--checkupdate");
         if (checkupdate >= 0)
         {

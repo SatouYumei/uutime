@@ -19,12 +19,17 @@ internal sealed class AddForm : ChromeForm
 
     public List<AppEntry> Result { get; } = new();
 
-    public AddForm(Kit kit, HashSet<string> watched)
+    readonly string title, verb;
+
+    /// <param name="watched">不列出的 exe（已经在监控的，或已经屏蔽的）</param>
+    public AddForm(Kit kit, HashSet<string> watched, string title = "添加要监控的应用", string verb = "添加")
     {
         this.kit = kit;
         this.watched = watched;
+        this.title = title;
+        this.verb = verb;
         var t = kit.T;
-        Text = "添加应用";
+        Text = title;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.CenterParent;
         SetBack(t.Bg);
@@ -105,7 +110,7 @@ internal sealed class AddForm : ChromeForm
     protected override void PaintRoot(Graphics g)
     {
         var t = kit.T;
-        Gfx.Text(g, "添加要监控的应用", kit.H2, t.Text, new Rectangle(S(22), 0, S(320), CaptionHeight));
+        Gfx.Text(g, title, kit.H2, t.Text, new Rectangle(S(22), 0, S(320), CaptionHeight));
 
         Gfx.FillRound(g, t.Input, searchRect, S(10));
         if (search.Focused) Gfx.StrokeRound(g, Theme.Mix(t.Accent, t.Input, 0.6f), searchRect, S(10), Math.Max(1, S(1.5f)));
@@ -118,7 +123,7 @@ internal sealed class AddForm : ChromeForm
 
     void UpdateOk()
     {
-        ok.Text = picked.Count == 0 ? "添加" : $"添加 {picked.Count} 个";
+        ok.Text = picked.Count == 0 ? verb : $"{verb} {picked.Count} 个";
         ok.Enabled = picked.Count > 0;
         ok.FitWidth();
         OnResize(EventArgs.Empty);
@@ -145,7 +150,7 @@ internal sealed class AddForm : ChromeForm
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
         string exe = Native.ExeName(dlg.FileName)!;
         if (!watched.Contains(exe) && !picked.Contains(exe))
-            Result.Add(new AppEntry { Exe = exe, Name = FriendlyName(dlg.FileName, exe), Path = dlg.FileName });
+            Result.Add(new AppEntry { Exe = exe, Name = AppInfo.FriendlyName(dlg.FileName, exe), Path = dlg.FileName });
         Accept();
     }
 
@@ -167,20 +172,10 @@ internal sealed class AddForm : ChromeForm
                     if (hasWindow && !existing.HasWindow) map[exe] = existing with { HasWindow = true };
                     continue;
                 }
-                map[exe] = new Candidate(exe, FriendlyName(path, exe), path, hasWindow);
+                map[exe] = new Candidate(exe, AppInfo.FriendlyName(path, exe), path, hasWindow);
             }
         }
         return map.Values.OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
-    }
-
-    static string FriendlyName(string? path, string exe)
-    {
-        try
-        {
-            if (path != null && FileVersionInfo.GetVersionInfo(path).FileDescription is { Length: > 0 } d) return d.Trim();
-        }
-        catch (Exception) { }
-        return Path.GetFileNameWithoutExtension(exe);
     }
 
     /// <summary>候选列表：点一下选中/取消，右侧圆形勾选。</summary>

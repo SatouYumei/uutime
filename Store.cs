@@ -8,23 +8,58 @@ internal sealed class AppEntry
     public string Exe { get; set; } = "";
     public string Name { get; set; } = "";
     public string? Path { get; set; }
+    /// <summary>自动监控发现的（不是手动添加的）。关掉自动监控时不显示、不计时，记录保留。</summary>
+    public bool Auto { get; set; }
 }
 
-/// <summary>全局设置（所有存档共用）。</summary>
-internal sealed class Settings
+/// <summary>自动监控范围</summary>
+internal enum AutoScope
+{
+    /// <summary>前台 + 有窗口的应用（默认）</summary>
+    Windows = 0,
+    /// <summary>只记前台，不记后台</summary>
+    Foreground = 1,
+    /// <summary>所有进程（不含 Windows 系统目录里的）</summary>
+    All = 2,
+}
+
+/// <summary>存档自己的设置，跟着存档走（切换、备份、导入都带着）。</summary>
+internal sealed class Prefs
 {
     /// <summary>无键鼠操作超过这么多分钟后，前台时间不再累计（计入后台）。0 表示不判断。</summary>
+    public int IdleMinutes { get; set; } = 5;
+    public string Theme { get; set; } = "dark";
+    /// <summary>定时检查新版本并推送通知。</summary>
+    public bool CheckUpdates { get; set; } = true;
+    public bool AutoMode { get; set; }
+    public AutoScope AutoScope { get; set; }
+    /// <summary>主界面侧边栏显示自动监控开关。</summary>
+    public bool ShowAutoToggle { get; set; } = true;
+    /// <summary>自动监控时不记录的 exe。</summary>
+    public List<string> Blocked { get; set; } = new();
+
+    public Prefs Clone() => new()
+    {
+        IdleMinutes = IdleMinutes, Theme = Theme, CheckUpdates = CheckUpdates, AutoMode = AutoMode,
+        AutoScope = AutoScope, ShowAutoToggle = ShowAutoToggle, Blocked = new(Blocked),
+    };
+}
+
+/// <summary>全局：当前是哪个存档。theme / idleMinutes 是 1.1 以前的全局设置，只用来给老存档补上。</summary>
+internal sealed class Settings
+{
     public int IdleMinutes { get; set; } = 5;
     public string Theme { get; set; } = "dark";
     /// <summary>当前存档的 id（profiles 下的文件夹名）。</summary>
     public string Profile { get; set; } = "";
 }
 
-/// <summary>一个存档：名字 + 监控的应用。统计在同目录的 usage.json。</summary>
+/// <summary>一个存档：名字、监控的应用、设置。统计在同目录的 usage.json。</summary>
 internal sealed class Profile
 {
     public string Name { get; set; } = "";
     public List<AppEntry> Apps { get; set; } = new();
+    public Prefs? Prefs { get; set; }
 }
 
 /// <summary>1.0 版的 config.json，只在迁移时读取。</summary>
@@ -43,6 +78,7 @@ internal sealed class Backup
     public string Name { get; set; } = "";
     public string Exported { get; set; } = "";
     public List<AppEntry>? Apps { get; set; }
+    public Prefs? Prefs { get; set; }
     public Dictionary<string, Dictionary<string, Stat>>? Usage { get; set; }
 }
 
@@ -55,7 +91,7 @@ internal sealed class Stat
 
 internal sealed record ProfileInfo(string Id, string Name, int Apps, int Days, long Fg);
 
-[JsonSourceGenerationOptions(WriteIndented = true, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSourceGenerationOptions(WriteIndented = true, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, UseStringEnumConverter = true)]
 [JsonSerializable(typeof(Settings))]
 [JsonSerializable(typeof(Profile))]
 [JsonSerializable(typeof(LegacyConfig))]
@@ -91,11 +127,17 @@ internal sealed class Store
     Profile profile = new();
     /// <summary>日期(yyyy-MM-dd) → exe → 统计</summary>
     Dictionary<string, Dictionary<string, Stat>> usage = new();
+    /// <summary>正在计时的 exe：手动添加的，加上自动监控开着时自动发现且没屏蔽的。</summary>
     public HashSet<string> Watched { get; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>存档里所有出现过的 exe（含屏蔽的、自动模式关着时的），自动发现时用来判断是不是新的。</summary>
+    public HashSet<string> Known { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public HashSet<string> Blocked { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     public string ProfileId => Settings.Profile;
     public string ProfileName => profile.Name;
-    public List<AppEntry> Apps => profile.Apps;
+    public Prefs Prefs => profile.Prefs!;
+    /// <summary>界面上显示的应用（和 Watched 一致）。</summary>
+    public List<AppEntry> Apps { get; private set; } = new();
 
     static string ProfileDir(string id) => System.IO.Path.Combine(ProfilesDir, id);
     static string ProfileFile(string id) => System.IO.Path.Combine(ProfileDir(id), "profile.json");
@@ -135,11 +177,11 @@ internal sealed class Store
 
     static string NewId() => DateTime.Now.ToString("yyyyMMdd") + "-" + Guid.NewGuid().ToString("N")[..6];
 
-    static string CreateEmpty(string name, List<AppEntry>? apps = null)
+    static string CreateEmpty(string name, List<AppEntry>? apps = null, Prefs? prefs = null)
     {
         string id = NewId();
         Directory.CreateDirectory(ProfileDir(id));
-        WriteAtomic(ProfileFile(id), JsonSerializer.Serialize(new Profile { Name = name, Apps = apps ?? new() }, JsonCtx.Default.Profile));
+        WriteAtomic(ProfileFile(id), JsonSerializer.Serialize(new Profile { Name = name, Apps = apps ?? new(), Prefs = prefs }, JsonCtx.Default.Profile));
         return id;
     }
 
@@ -150,6 +192,12 @@ internal sealed class Store
             profile = Read(ProfileFile(id), JsonCtx.Default.Profile) ?? new Profile { Name = Environment.UserName };
             usage = Read(UsageFile(id), JsonCtx.Default.DictionaryStringDictionaryStringStat) ?? new();
             dirty = false;
+            if (profile.Prefs == null)
+            {
+                // 1.1 以前设置是全局的：补到这个存档里
+                profile.Prefs = new Prefs { IdleMinutes = Settings.IdleMinutes, Theme = Settings.Theme };
+                WriteAtomic(ProfileFile(id), JsonSerializer.Serialize(profile, JsonCtx.Default.Profile));
+            }
             RebuildWatched();
         }
     }
@@ -171,7 +219,15 @@ internal sealed class Store
     void RebuildWatched()
     {
         Watched.Clear();
-        foreach (var a in profile.Apps) Watched.Add(a.Exe);
+        Known.Clear();
+        Blocked.Clear();
+        foreach (string b in Prefs.Blocked) Blocked.Add(b);
+        foreach (var a in profile.Apps)
+        {
+            Known.Add(a.Exe);
+            if (!a.Auto || (Prefs.AutoMode && !Blocked.Contains(a.Exe))) Watched.Add(a.Exe);
+        }
+        Apps = profile.Apps.Where(a => Watched.Contains(a.Exe)).ToList();
     }
 
     // ───── 当前存档 ─────
@@ -181,10 +237,49 @@ internal sealed class Store
         lock (sync)
         {
             foreach (var a in apps)
-                if (Watched.Add(a.Exe)) profile.Apps.Add(a);
+            {
+                // 自动发现过的转成手动添加
+                if (profile.Apps.Find(x => string.Equals(x.Exe, a.Exe, StringComparison.OrdinalIgnoreCase)) is { } old) old.Auto = false;
+                else profile.Apps.Add(a);
+            }
+            RebuildWatched();
         }
         SaveProfile();
     }
+
+    /// <summary>自动监控发现了新应用。</summary>
+    public void AddAuto(string exe, string name, string? path)
+    {
+        lock (sync)
+        {
+            if (Known.Contains(exe)) return;
+            profile.Apps.Add(new AppEntry { Exe = exe, Name = name, Path = path, Auto = true });
+            RebuildWatched();
+        }
+        SaveProfile();
+    }
+
+    public void SetBlocked(string exe, bool blocked)
+    {
+        lock (sync)
+        {
+            Prefs.Blocked.RemoveAll(b => string.Equals(b, exe, StringComparison.OrdinalIgnoreCase));
+            if (blocked) Prefs.Blocked.Add(exe.ToLowerInvariant());
+            RebuildWatched();
+        }
+        SaveProfile();
+    }
+
+    /// <summary>改了存档设置后写盘；自动监控相关的会重新算要计时的应用。</summary>
+    public void SavePrefs()
+    {
+        lock (sync) RebuildWatched();
+        SaveProfile();
+    }
+
+    /// <summary>某个 exe 在存档里记的名字和路径（屏蔽列表显示用）。</summary>
+    public AppEntry? Find(string exe) =>
+        profile.Apps.Find(a => string.Equals(a.Exe, exe, StringComparison.OrdinalIgnoreCase));
 
     public void RemoveApp(string exe)
     {
@@ -196,17 +291,6 @@ internal sealed class Store
         SaveProfile();
     }
 
-    public void SetIdleMinutes(int minutes)
-    {
-        Settings.IdleMinutes = minutes;
-        SaveSettings();
-    }
-
-    public void SetTheme(string id)
-    {
-        Settings.Theme = id;
-        SaveSettings();
-    }
 
     public void Add(string exe, long fg, long bg)
     {
@@ -278,7 +362,14 @@ internal sealed class Store
         SaveSettings();
     }
 
-    public string CreateProfile(string name) => CreateEmpty(name);
+    /// <summary>新存档沿用当前的主题等设置，但不带自动监控和屏蔽列表。</summary>
+    public string CreateProfile(string name)
+    {
+        var prefs = Prefs.Clone();
+        prefs.AutoMode = false;
+        prefs.Blocked.Clear();
+        return CreateEmpty(name, null, prefs);
+    }
 
     public void RenameProfile(string id, string name)
     {
@@ -313,12 +404,12 @@ internal sealed class Store
         Backup b;
         if (id == ProfileId)
         {
-            lock (sync) b = new Backup { Name = profile.Name, Apps = profile.Apps, Usage = usage };
+            lock (sync) b = new Backup { Name = profile.Name, Apps = profile.Apps, Prefs = profile.Prefs, Usage = usage };
         }
         else
         {
             var p = Read(ProfileFile(id), JsonCtx.Default.Profile) ?? new Profile();
-            b = new Backup { Name = p.Name, Apps = p.Apps, Usage = Read(UsageFile(id), JsonCtx.Default.DictionaryStringDictionaryStringStat) ?? new() };
+            b = new Backup { Name = p.Name, Apps = p.Apps, Prefs = p.Prefs, Usage = Read(UsageFile(id), JsonCtx.Default.DictionaryStringDictionaryStringStat) ?? new() };
         }
         b.Format = BackupFormat;
         b.Version = 1;
@@ -344,7 +435,7 @@ internal sealed class Store
             name = baseName;
             for (int n = 2; names.Contains(name); n++) name = $"{baseName}{n}";
         }
-        string id = CreateEmpty(name, b.Apps);
+        string id = CreateEmpty(name, b.Apps, b.Prefs);
         WriteAtomic(UsageFile(id), JsonSerializer.Serialize(b.Usage ?? new(), Compact.DictionaryStringDictionaryStringStat));
         return id;
     }

@@ -32,7 +32,10 @@ internal sealed class TrayContext : ApplicationContext
         tray = new NotifyIcon { Icon = icon, Text = $"uutime {version} · 应用使用时间", ContextMenuStrip = menu, Visible = true };
         tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) ShowMain(); };
 
-        updater = new Updater(ExitThread);
+        // 推送通知点了就打开主窗口，在侧边栏点「更新」才装
+        updater = new Updater(ExitThread, () => store.Prefs.CheckUpdates,
+            v => Notify($"uutime {Updater.Text(v)} 发布了，点这里打开 uutime 更新"));
+        tray.BalloonTipClicked += (_, _) => ShowMain();
         if (updated) Notify($"已更新到 {version}");
 
         // 创建控件后才有 WinForms 同步上下文
@@ -49,7 +52,7 @@ internal sealed class TrayContext : ApplicationContext
 
     void ThemeMenu()
     {
-        var t = Theme.ById(store.Settings.Theme);
+        var t = Theme.ById(store.Prefs.Theme);
         menu.Renderer = new ToolStripProfessionalRenderer(new MenuColors(t)) { RoundedEdges = false };
         menu.BackColor = t.Card;
         foreach (ToolStripItem item in menu.Items)
@@ -102,6 +105,7 @@ internal sealed class TrayContext : ApplicationContext
         SystemEvents.SessionEnding -= OnSessionEnding;
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         showWait.Unregister(null);
+        updater.Dispose();
         form?.Close();
         tracker.Dispose();
         store.Save();

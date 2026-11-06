@@ -4,13 +4,40 @@ using System.Security.Cryptography;
 namespace UuTime;
 
 /// <summary>
-/// 从 GitHub Releases 检查更新，只在用户点「检查更新」时联网。不走 API（共用出口 IP 时匿名额度很容易用完），
+/// 从 GitHub Releases 检查更新。不走 API（共用出口 IP 时匿名额度很容易用完），
 /// 而是看 releases/latest 跳转到哪个 tag，再按固定文件名下载安装包和它的 .sha256 校验。
-/// 用户确认更新后静默安装，装完在托盘里重新启动。
+/// 推送：打开设置里的「自动检查更新」后，每次启动 uutime 只查一次（启动 15 秒后），有新版本只通知，不自动装。
+/// 用户点「更新」后才下载、静默安装，装完在托盘里重新启动。
 /// </summary>
-internal sealed class Updater(Action exit)
+internal sealed class Updater : IDisposable
 {
     const string Repo = "https://github.com/SatouYumei/uutime";
+    const int FirstCheckMs = 15_000;
+
+    readonly Action exit;
+    readonly System.Windows.Forms.Timer timer = new() { Interval = FirstCheckMs };
+
+    /// <param name="exit">退出 uutime，让安装程序替换文件</param>
+    /// <param name="enabled">定时检查是否开着（存档设置）</param>
+    /// <param name="push">发现新版本时的通知</param>
+    public Updater(Action exit, Func<bool> enabled, Action<Version> push)
+    {
+        this.exit = exit;
+        timer.Tick += async (_, _) =>
+        {
+            timer.Stop(); // 每次启动只查这一次
+            if (!enabled() || Busy) return;
+            await CheckAsync();
+            if (Available is { } v) push(v);
+            Native.TrimWorkingSet();
+        };
+        timer.Start();
+    }
+
+    /// <summary>检查或更新的状态变了（界面刷新按钮和文字）。</summary>
+    public event Action? Changed;
+
+    public void Dispose() => timer.Dispose();
 
     /// <summary>检查到的新版本，没有为 null。窗口关了再开也还记得。</summary>
     public Version? Available { get; private set; }
@@ -77,6 +104,7 @@ internal sealed class Updater(Action exit)
         Status = status;
         Failed = failed;
         Detail = detail;
+        Changed?.Invoke();
     }
 
     /// <summary>查最新版本；有新版本时 Available 不为 null。</summary>

@@ -259,6 +259,16 @@ internal static class Gfx
                 g.DrawEllipse(pen, R(5.5f, 5.5f, 12.5f, 12.5f));
                 g.DrawLine(pen, P(16.6f, 16.6f), P(22, 22));
                 break;
+            case "gear":
+                g.DrawEllipse(pen, R(9.5f, 9.5f, 9, 9));
+                for (int i = 0; i < 8; i++)
+                {
+                    double a = i * Math.PI / 4;
+                    float c1 = (float)Math.Cos(a), s1 = (float)Math.Sin(a);
+                    g.DrawLine(pen, P(14 + 7.2f * c1, 14 + 7.2f * s1), P(14 + 9.6f * c1, 14 + 9.6f * s1));
+                }
+                g.DrawEllipse(pen, R(7, 7, 14, 14));
+                break;
             case "user":
                 g.DrawEllipse(pen, R(9.5f, 4.5f, 9, 9));
                 g.DrawArc(pen, R(5.5f, 15.5f, 17, 14), 180, 180);

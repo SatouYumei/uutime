@@ -28,6 +28,24 @@ internal static unsafe class Native
     static extern bool EnumChildWindows(IntPtr parent, EnumWindowsProc proc, IntPtr lParam);
 
     [DllImport("user32.dll")]
+    static extern bool EnumWindows(EnumWindowsProc proc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    static extern bool IsWindowVisible(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    static extern IntPtr GetWindow(IntPtr hwnd, uint cmd);
+
+    [DllImport("user32.dll")]
+    static extern int GetWindowTextLengthW(IntPtr hwnd);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    static extern nint GetWindowLongPtr(IntPtr hwnd, int index);
+
+    [DllImport("dwmapi.dll")]
+    static extern int DwmGetWindowAttribute(IntPtr hwnd, int attr, out int value, int size);
+
+    [DllImport("user32.dll")]
     static extern bool GetLastInputInfo(ref LASTINPUTINFO info);
 
     [DllImport("user32.dll")]
@@ -143,21 +161,28 @@ internal static unsafe class Native
     }
 
     /// <summary>窗口所属进程的 exe 名（小写）。UWP 应用的外壳是 ApplicationFrameHost，需要找到真正的子进程。</summary>
-    public static string? WindowExe(IntPtr hwnd)
+    public static string? WindowExe(IntPtr hwnd) => WindowExe(hwnd, out _);
+
+    public static string? WindowExe(IntPtr hwnd, out uint pid)
     {
+        pid = 0;
         if (hwnd == IntPtr.Zero) return null;
-        GetWindowThreadProcessId(hwnd, out uint pid);
+        GetWindowThreadProcessId(hwnd, out pid);
         string? exe = ExeName(ProcessImagePath(pid));
         if (exe == "applicationframehost.exe")
         {
-            uint child = 0;
+            uint host = pid, child = 0;
             EnumChildWindows(hwnd, (c, _) =>
             {
                 GetWindowThreadProcessId(c, out uint cp);
-                if (cp != pid) { child = cp; return false; }
+                if (cp != host) { child = cp; return false; }
                 return true;
             }, IntPtr.Zero);
-            if (child != 0) exe = ExeName(ProcessImagePath(child)) ?? exe;
+            if (child != 0 && ExeName(ProcessImagePath(child)) is { } real)
+            {
+                exe = real;
+                pid = child;
+            }
         }
         return exe;
     }
@@ -187,6 +212,49 @@ internal static unsafe class Native
         {
             CloseHandle(snap);
         }
+    }
+
+    public delegate void ProcessVisitor(uint pid, ReadOnlySpan<char> exe);
+
+    /// <summary>遍历所有进程（只拿 pid 和 exe 名，不打开进程）。</summary>
+    public static void ScanProcesses(ProcessVisitor visit)
+    {
+        IntPtr snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap == IntPtr.Zero || snap == -1) return;
+        try
+        {
+            var e = new PROCESSENTRY32W { dwSize = (uint)sizeof(PROCESSENTRY32W) };
+            if (!Process32FirstW(snap, ref e)) return;
+            do
+            {
+                if (e.th32ProcessID > 4) visit(e.th32ProcessID, MemoryMarshal.CreateReadOnlySpanFromNullTerminated(e.szExeFile));
+            } while (Process32NextW(snap, ref e));
+        }
+        finally
+        {
+            CloseHandle(snap);
+        }
+    }
+
+    static HashSet<uint>? windowPids;
+    static readonly EnumWindowsProc collectWindow = (hwnd, _) =>
+    {
+        const int GWL_EXSTYLE = -20, WS_EX_TOOLWINDOW = 0x80, DWMWA_CLOAKED = 14;
+        if (!IsWindowVisible(hwnd) || GetWindow(hwnd, 4 /* GW_OWNER */) != IntPtr.Zero) return true;
+        if ((GetWindowLongPtr(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) != 0 || GetWindowTextLengthW(hwnd) == 0) return true;
+        if (DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, out int cloaked, 4) == 0 && cloaked != 0) return true; // 挂起的商店应用、其他虚拟桌面
+        GetWindowThreadProcessId(hwnd, out uint pid);
+        windowPids!.Add(pid);
+        return true;
+    };
+
+    /// <summary>有“正常窗口”（任务栏上能看到的那种）的进程。</summary>
+    public static void WindowedPids(HashSet<uint> result)
+    {
+        result.Clear();
+        windowPids = result;
+        EnumWindows(collectWindow, IntPtr.Zero);
+        windowPids = null;
     }
 
     public static void TrimWorkingSet()

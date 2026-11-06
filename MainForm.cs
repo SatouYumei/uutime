@@ -12,13 +12,12 @@ internal sealed class MainForm : ChromeForm
     readonly System.Windows.Forms.Timer disarm = new() { Interval = 3000 };
 
     Kit kit = null!;
-    IconButton palette = null!, minimize = null!, close = null!;
-    TextButton profileBtn = null!, updateBtn = null!;
+    IconButton minimize = null!, close = null!;
+    TextButton profileBtn = null!, updateBtn = null!, settingsBtn = null!;
     Surface sidebar = null!, main = null!;
     ItemList list = null!;
     TextButton addBtn = null!, removeBtn = null!;
-    Toggle autostart = null!;
-    Stepper idle = null!;
+    Toggle autoToggle = null!;
     Segmented seg = null!;
     StatsView stats = null!;
 
@@ -26,7 +25,7 @@ internal sealed class MainForm : ChromeForm
     int range;
     bool removeArmed;
     string caption = "", heading = "", meta = "";
-    Rectangle updateRow, autoRow, idleRow;
+    Rectangle updateRow, autoRow;
     int dividerY;
 
     public event Action? ThemeChanged;
@@ -41,6 +40,8 @@ internal sealed class MainForm : ChromeForm
         StartPosition = FormStartPosition.CenterScreen;
         Size = new Size(S(940), S(640));
 
+        if (updater != null) updater.Changed += OnUpdaterChanged;
+        tracker.Discovered += OnDiscovered;
         refresh.Tick += (_, _) => RefreshData();
         disarm.Tick += (_, _) => Disarm();
         Build();
@@ -72,6 +73,8 @@ internal sealed class MainForm : ChromeForm
         {
             refresh.Dispose();
             disarm.Dispose();
+            if (updater != null) updater.Changed -= OnUpdaterChanged;
+            tracker.Discovered -= OnDiscovered;
         }
         base.Dispose(disposing);
         if (disposing) kit?.Dispose();
@@ -83,7 +86,7 @@ internal sealed class MainForm : ChromeForm
         SuspendLayout();
         foreach (var c in Root.Controls.Cast<Control>().ToList()) c.Dispose();
         kit?.Dispose();
-        kit = new Kit(Theme.ById(store.Settings.Theme), DeviceDpi);
+        kit = new Kit(Theme.ById(store.Prefs.Theme), DeviceDpi);
         var t = kit.T;
         SetBack(t.Bg);
         CaptionHeight = S(56);
@@ -92,8 +95,6 @@ internal sealed class MainForm : ChromeForm
         profileBtn = new TextButton(kit, t.Bg, ProfileLabel(), ButtonKind.Ghost, "user");
         profileBtn.Click += (_, _) => OpenProfiles();
         kit.Tip.SetToolTip(profileBtn, "存档管理：切换、改名、备份、导入");
-        palette = new IconButton(kit, t.Bg, "palette", "主题");
-        palette.Click += (_, _) => OpenThemes();
         minimize = new IconButton(kit, t.Bg, "minus", "最小化到托盘");
         minimize.Click += (_, _) => WindowState = FormWindowState.Minimized;
         close = new IconButton(kit, t.Bg, "close", "关闭（托盘里继续记录）");
@@ -105,14 +106,19 @@ internal sealed class MainForm : ChromeForm
         list.Picked += id => Select(id == "" ? null : id);
         addBtn = new TextButton(kit, t.Sidebar, "添加应用", ButtonKind.Ghost, "plus");
         addBtn.Click += (_, _) => AddApps();
-        autostart = new Toggle(kit, t.Sidebar) { Checked = Autostart.Enabled };
-        autostart.CheckedChanged += () => Autostart.Enabled = autostart.Checked;
+        autoToggle = new Toggle(kit, t.Sidebar) { Checked = store.Prefs.AutoMode };
+        autoToggle.CheckedChanged += () =>
+        {
+            store.Prefs.AutoMode = autoToggle.Checked;
+            store.SavePrefs();
+            PrefsChanged();
+        };
+        kit.Tip.SetToolTip(autoToggle, "打开后，打开的应用会自动开始记录。范围和屏蔽列表在设置里。");
         updateBtn = new TextButton(kit, t.Sidebar, "检查更新", ButtonKind.Outline) { Height = S(30), Visible = updater != null };
         updateBtn.Click += async (_, _) => await UpdateClicked();
-        idle = new Stepper(kit, t.Sidebar, store.Settings.IdleMinutes, 0, 60, v => v == 0 ? "不判定" : $"{v} 分钟");
-        idle.ValueChanged += v => store.SetIdleMinutes(v);
-        kit.Tip.SetToolTip(idle, "这么久没碰键鼠，前台时间就暂停（计入后台）。看视频可以设为不判定。");
-        sidebar.Controls.AddRange([list, addBtn, updateBtn, autostart, idle]);
+        settingsBtn = new TextButton(kit, t.Sidebar, "设置", ButtonKind.Ghost, "gear");
+        settingsBtn.Click += (_, _) => OpenSettings();
+        sidebar.Controls.AddRange([list, addBtn, autoToggle, updateBtn, settingsBtn]);
 
         main = new Surface(t.Bg);
         main.Paint += PaintMain;
@@ -125,7 +131,7 @@ internal sealed class MainForm : ChromeForm
         removeBtn.Click += (_, _) => RemoveSelected();
         main.Controls.AddRange([seg, stats, removeBtn]);
 
-        Root.Controls.AddRange([profileBtn, palette, minimize, close, sidebar, main]);
+        Root.Controls.AddRange([profileBtn, minimize, close, sidebar, main]);
         ApplyChrome(t);
         ResumeLayout();
         LayoutAll();
@@ -158,7 +164,7 @@ internal sealed class MainForm : ChromeForm
         int w = ClientSize.Width, h = ClientSize.Height, head = CaptionHeight;
 
         int x = w - S(12);
-        foreach (var b in new Control[] { close, minimize, palette, profileBtn })
+        foreach (var b in new Control[] { close, minimize, profileBtn })
         {
             x -= b.Width;
             b.Location = new Point(x, (head - b.Height) / 2);
@@ -169,14 +175,16 @@ internal sealed class MainForm : ChromeForm
         sidebar.Bounds = new Rectangle(0, head + 1, sw, h - head - 1);
         main.Bounds = new Rectangle(sw + 1, head + 1, w - sw - 1, h - head - 1);
 
+        // 侧边栏底部：[自动监控 开关]（可在设置里隐藏）/ 版本号 + 检查更新 / 设置
         int sh = sidebar.Height;
-        idleRow = new Rectangle(0, sh - S(14) - S(42), sw, S(42));
-        autoRow = new Rectangle(0, idleRow.Y - S(42), sw, S(42));
-        idle.Location = new Point(sw - S(16) - idle.Width, idleRow.Y + (idleRow.Height - idle.Height) / 2);
-        autostart.Location = new Point(sw - S(18) - autostart.Width, autoRow.Y + (autoRow.Height - autostart.Height) / 2);
-        updateRow = new Rectangle(0, autoRow.Y - S(42), sw, S(42));
+        settingsBtn.Bounds = new Rectangle(S(8), sh - S(12) - S(40), sw - S(16), S(40));
+        updateRow = new Rectangle(0, settingsBtn.Top - S(44), sw, S(44));
         updateBtn.Location = new Point(sw - S(16) - updateBtn.Width, updateRow.Y + (updateRow.Height - updateBtn.Height) / 2);
-        dividerY = updateRow.Y - S(8);
+        bool showAuto = store.Prefs.ShowAutoToggle;
+        autoToggle.Visible = showAuto;
+        autoRow = new Rectangle(0, updateRow.Y - (showAuto ? S(42) : 0), sw, showAuto ? S(42) : 0);
+        autoToggle.Location = new Point(sw - S(18) - autoToggle.Width, autoRow.Y + (autoRow.Height - autoToggle.Height) / 2);
+        dividerY = autoRow.Y - S(8);
         addBtn.Bounds = new Rectangle(S(8), dividerY - S(8) - S(42), sw - S(16), S(42));
         list.Bounds = new Rectangle(0, S(8), sw, addBtn.Top - S(12));
 
@@ -216,8 +224,7 @@ internal sealed class MainForm : ChromeForm
         string ver = updater == null || updater.Status.Length == 0 ? $"版本 {Updater.Text(Updater.Current)}" : updater.Status;
         var verInk = updater?.Failed == true ? t.Danger : updater?.Available != null ? t.Accent : t.Text;
         Gfx.Text(g, ver, kit.Body, verInk, new Rectangle(S(20), updateRow.Y, updateBtn.Left - S(28), updateRow.Height));
-        Gfx.Text(g, "开机自启", kit.Body, t.Text, new Rectangle(S(20), autoRow.Y, S(120), autoRow.Height));
-        Gfx.Text(g, "空闲判定", kit.Body, t.Text, new Rectangle(S(20), idleRow.Y, S(100), idleRow.Height));
+        if (autoRow.Height > 0) Gfx.Text(g, "自动监控", kit.Body, t.Text, new Rectangle(S(20), autoRow.Y, S(120), autoRow.Height));
     }
 
     void PaintMain(object? sender, PaintEventArgs e)
@@ -254,7 +261,7 @@ internal sealed class MainForm : ChromeForm
         list.Items.Clear();
         list.Items.Add(new ItemList.Item { Id = "", Title = "全部应用", Glyph = "grid" });
         if (store.Apps.Count > 0)
-            list.Items.Add(new ItemList.Item { Header = true, Title = $"监控中 · {store.Apps.Count}" });
+            list.Items.Add(new ItemList.Item { Header = true, Title = $"{(store.Prefs.AutoMode ? "自动监控" : "监控中")} · {store.Apps.Count}" });
         foreach (var a in store.Apps)
             list.Items.Add(new ItemList.Item { Id = a.Exe, Title = a.Name, Path = a.Path, Sub = "" });
         list.SelectedId = selected ?? "";
@@ -288,9 +295,10 @@ internal sealed class MainForm : ChromeForm
 
         if (rows.Count == 0)
         {
-            heading = "开始记录";
-            meta = "选择要统计的应用，uutime 只记录你添加的程序";
-            stats.ShowEmpty();
+            bool auto = store.Prefs.AutoMode;
+            heading = auto ? "自动监控中" : "开始记录";
+            meta = auto ? "打开的应用会自动出现在这里" : "选择要统计的应用，uutime 只记录你添加的程序";
+            stats.ShowEmpty(auto);
         }
         else if (selected == null)
         {
@@ -321,6 +329,7 @@ internal sealed class MainForm : ChromeForm
         if (exe == selected) return;
         selected = exe;
         list.SelectedId = exe ?? "";
+        removeArmed = true; // 让 Disarm 按选中的应用重设按钮文字
         Disarm();
         LayoutAll();
         RefreshData();
@@ -338,20 +347,25 @@ internal sealed class MainForm : ChromeForm
         RebuildItems();
     }
 
-    /// <summary>点两下才移除：第一下变成“确认”，3 秒内再点一下生效。</summary>
+    /// <summary>选中的是自动监控发现的应用：按钮是「屏蔽」，否则是「停止监控」。</summary>
+    bool SelectedIsAuto => selected != null && store.Find(selected)?.Auto == true;
+
+    /// <summary>点两下才生效：第一下变成“确认”，3 秒内再点一下。</summary>
     void RemoveSelected()
     {
         if (selected == null) return;
         if (!removeArmed)
         {
             removeArmed = true;
-            removeBtn.Text = "再点一次确认（历史数据会保留）";
+            removeBtn.Text = SelectedIsAuto ? "再点一次确认屏蔽（记录会保留）" : "再点一次确认（历史数据会保留）";
             removeBtn.FitWidth();
             disarm.Start();
             return;
         }
         tracker.Flush();
-        store.RemoveApp(selected);
+        if (SelectedIsAuto) store.SetBlocked(selected, true);
+        else store.RemoveApp(selected);
+        tracker.Rescan();
         Disarm();
         selected = null;
         RebuildItems();
@@ -362,7 +376,7 @@ internal sealed class MainForm : ChromeForm
         disarm.Stop();
         if (!removeArmed) return;
         removeArmed = false;
-        removeBtn.Text = "停止监控";
+        removeBtn.Text = SelectedIsAuto ? "屏蔽" : "停止监控";
         removeBtn.FitWidth();
     }
 
@@ -374,7 +388,7 @@ internal sealed class MainForm : ChromeForm
         PreviewMode = true;
         foreach (string id in themes)
         {
-            store.Settings.Theme = id;
+            store.Prefs.Theme = id;
             using var f = new MainForm(store, tracker, icon)
             {
                 StartPosition = FormStartPosition.Manual,
@@ -395,6 +409,7 @@ internal sealed class MainForm : ChromeForm
                 ShowDialogPreview(new ThemePicker(f.kit, id), Path.Combine(outDir, $"{id}-themes.png"));
                 ShowDialogPreview(new AddForm(f.kit, store.Watched), Path.Combine(outDir, $"{id}-add.png"));
                 ShowDialogPreview(new ProfileForm(f.kit, store, _ => { }, () => { }), Path.Combine(outDir, $"{id}-profiles.png"));
+                ShowDialogPreview(new SettingsForm(f.kit, store, () => { }), Path.Combine(outDir, $"{id}-settings.png"));
             }
             f.Close();
         }
@@ -475,6 +490,12 @@ internal sealed class MainForm : ChromeForm
         dlg.NameChanged += UpdateProfileButton;
         dlg.ShowDialog(this);
         UpdateProfileButton();
+        // 设置跟着存档走：换了存档可能换了主题，对话框关了再重建
+        if (kit.T.Id != store.Prefs.Theme)
+        {
+            Build();
+            ThemeChanged?.Invoke();
+        }
     }
 
     /// <summary>切换存档：先把到现在为止的时间记到旧存档，再换成新存档的应用列表。</summary>
@@ -485,21 +506,40 @@ internal sealed class MainForm : ChromeForm
         tracker.Rescan();
         selected = null;
         Disarm();
-        RebuildItems();
+        PrefsChanged();
         UpdateProfileButton();
     }
 
-    void OpenThemes()
+    /// <summary>自动监控相关的设置变了：重新扫描、刷新列表和侧边栏开关。</summary>
+    void PrefsChanged()
     {
-        string chosen;
-        using (var picker = new ThemePicker(kit, store.Settings.Theme))
+        tracker.Rescan();
+        autoToggle.Checked = store.Prefs.AutoMode;
+        RebuildItems();
+        sidebar.Invalidate();
+    }
+
+    void OpenSettings()
+    {
+        // 换主题时设置页返回 Retry：主窗口按新主题重建后再打开设置
+        while (true)
         {
-            if (picker.ShowDialog(this) != DialogResult.OK) return;
-            chosen = picker.Chosen;
+            DialogResult r;
+            using (var dlg = new SettingsForm(kit, store, PrefsChanged)) r = dlg.ShowDialog(this);
+            if (r != DialogResult.Retry) break;
+            Build();
+            ThemeChanged?.Invoke();
         }
-        if (chosen == store.Settings.Theme) return;
-        store.SetTheme(chosen);
-        Build();
-        ThemeChanged?.Invoke();
+        PrefsChanged();
+    }
+
+    void OnUpdaterChanged()
+    {
+        if (!IsDisposed && IsHandleCreated) SyncUpdate();
+    }
+
+    void OnDiscovered()
+    {
+        if (!IsDisposed && Visible) RebuildItems();
     }
 }

@@ -24,9 +24,13 @@ internal sealed class StatsView : Flat
 
     public StatsView(Kit kit, Color back) : base(kit, back) { }
 
-    public void ShowEmpty()
+    bool emptyAuto;
+
+    /// <param name="auto">自动监控开着：提示等应用出现，不显示「添加应用」按钮</param>
+    public void ShowEmpty(bool auto)
     {
         mode = Mode.Empty;
+        emptyAuto = auto;
         Invalidate();
     }
 
@@ -337,9 +341,15 @@ internal sealed class StatsView : Flat
         int cy = Height / 2 - S(70);
         float icon = S(56);
         Gfx.Icon(g, "grid", new RectangleF((Width - icon) / 2, cy, icon, icon), T.Muted);
-        Gfx.Text(g, "还没有监控任何应用", K.H2, T.Text, new Rectangle(0, cy + S(70), Width, S(28)), TextFormatFlags.HorizontalCenter);
-        Gfx.Text(g, "默认什么都不记录。添加之后，会分别统计前台使用和后台运行的时间。", K.Small, T.Muted,
+        Gfx.Text(g, emptyAuto ? "正在等应用出现" : "还没有监控任何应用", K.H2, T.Text, new Rectangle(0, cy + S(70), Width, S(28)), TextFormatFlags.HorizontalCenter);
+        Gfx.Text(g, emptyAuto ? "自动监控已打开，打开或切到一个应用，几秒后就会出现在这里。"
+            : "默认什么都不记录。添加之后，会分别统计前台使用和后台运行的时间。", K.Small, T.Muted,
             new Rectangle(0, cy + S(102), Width, S(20)), TextFormatFlags.HorizontalCenter);
+        if (emptyAuto)
+        {
+            addRect = Rectangle.Empty;
+            return;
+        }
 
         string text = "添加应用";
         int bw = Gfx.Measure(text, K.BodyBold).Width + S(62);

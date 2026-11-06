@@ -38,10 +38,25 @@ internal static class AppIcon
     }
 }
 
+internal static class AppInfo
+{
+    /// <summary>应用的显示名：exe 文件说明，没有就用文件名。</summary>
+    public static string FriendlyName(string? path, string exe)
+    {
+        try
+        {
+            if (path != null && System.Diagnostics.FileVersionInfo.GetVersionInfo(path).FileDescription is { Length: > 0 } d) return d.Trim();
+        }
+        catch (Exception) { }
+        return Path.GetFileNameWithoutExtension(exe);
+    }
+}
+
 internal static class Autostart
 {
     const string Key = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    const string Name = "uutime";
+    // 从 bin 运行的开发版用另一个名字，免得覆盖安装版的开机自启
+    static string Name => Updater.Installed ? "uutime" : "uutime-dev";
 
     static string Command => $"\"{Environment.ProcessPath}\" --tray";
 

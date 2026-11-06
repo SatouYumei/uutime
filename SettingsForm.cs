@@ -52,7 +52,9 @@ internal sealed class SettingsForm : ChromeForm
         var autostart = new Toggle(kit, t.Bg) { Checked = Autostart.Enabled };
         autostart.CheckedChanged += () => Autostart.Enabled = autostart.Checked;
 
-        var theme = new TextButton(kit, t.Bg, Theme.ById(prefs.Theme).Name, ButtonKind.Outline, "palette");
+        string look = (prefs.Theme == "light" ? "亮色" : "暗色") + (prefs.Base != null || prefs.Accent != null ? " · 自定义" : "")
+            + (store.Background != null ? " · 背景图" : "");
+        var theme = new TextButton(kit, t.Bg, look, ButtonKind.Outline, "palette");
         theme.Click += (_, _) => PickTheme();
 
         var idle = new Stepper(kit, t.Bg, prefs.IdleMinutes, 0, 60, v => v == 0 ? "不判定" : $"{v} 分钟");
@@ -82,7 +84,7 @@ internal sealed class SettingsForm : ChromeForm
         [
             ("常规", [
                 new Row("开机自启", () => "这台电脑的设置，不跟存档走", autostart),
-                new Row("主题", () => "", theme),
+                new Row("外观", () => "暗色 / 亮色、自定义颜色、背景图", theme),
                 new Row("空闲判定", () => "这么久没碰键鼠或手柄，前台时间就暂停", idle),
             ]),
             ("更新", [
@@ -175,11 +177,9 @@ internal sealed class SettingsForm : ChromeForm
 
     void PickTheme()
     {
-        using var picker = new ThemePicker(kit, store.Prefs.Theme);
-        if (picker.ShowDialog(this) != DialogResult.OK || picker.Chosen == store.Prefs.Theme) return;
-        store.Prefs.Theme = picker.Chosen;
-        store.SavePrefs();
-        DialogResult = DialogResult.Retry; // 主窗口换好主题后重新打开设置
+        using var dlg = new AppearanceForm(kit, store);
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        DialogResult = DialogResult.Retry; // 主窗口按新外观重建后重新打开设置
     }
 
     void AddBlocked()

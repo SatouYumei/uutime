@@ -52,7 +52,7 @@ internal sealed class TrayContext : ApplicationContext
 
     void ThemeMenu()
     {
-        var t = Theme.ById(store.Prefs.Theme);
+        var t = Theme.From(store.Prefs);
         menu.Renderer = new ToolStripProfessionalRenderer(new MenuColors(t)) { RoundedEdges = false };
         menu.BackColor = t.Card;
         foreach (ToolStripItem item in menu.Items)

@@ -1,13 +1,16 @@
 namespace UuTime;
 
-/// <summary>界面配色，和 chatuutts 共用同一套。</summary>
+/// <summary>
+/// 界面配色。默认只有暗色、亮色两套；自定义时用户只挑「底色」和「主题色」两个颜色，
+/// 侧边栏、卡片、输入框、边框、文字等都按底色明暗自动推出来。
+/// </summary>
 internal sealed record Theme(
     string Id, string Name,
     Color Bg, Color Sidebar, Color Card, Color Input,
     Color Text, Color Muted, Color Accent, Color AccentText,
     Color Border, Color Hover, Color Selected, Color Danger)
 {
-    public bool IsDark => Bg.GetBrightness() < 0.5f;
+    public bool IsDark => Luma(Bg) < 0.45f;
 
     /// <summary>后台时间用的浅色强调：强调色按比例混进卡片底色。</summary>
     public Color AccentSoft => Mix(Accent, Card, 0.38f);
@@ -15,36 +18,111 @@ internal sealed record Theme(
     public static Color Mix(Color a, Color b, float t) => Color.FromArgb(
         (int)(a.R * t + b.R * (1 - t)), (int)(a.G * t + b.G * (1 - t)), (int)(a.B * t + b.B * (1 - t)));
 
-    static Theme Make(string id, string name, string bg, string sidebar, string card, string input, string text,
-        string muted, string accent, string accentText, string border, string hover, string selected, string danger) =>
-        new(id, name, C(bg), C(sidebar), C(card), C(input), C(text), C(muted), C(accent), C(accentText),
-            C(border), C(hover), C(selected), C(danger));
+    /// <summary>amount &gt; 0 往白色调，&lt; 0 往黑色调。</summary>
+    public static Color Shade(Color c, float amount) =>
+        amount >= 0 ? Mix(Color.White, c, amount) : Mix(Color.Black, c, -amount);
 
-    static Color C(string hex) => ColorTranslator.FromHtml(hex);
+    public static float Luma(Color c) => (0.2126f * c.R + 0.7152f * c.G + 0.0722f * c.B) / 255f;
 
-    public static readonly Theme[] All =
+    public static Color C(string hex) => ColorTranslator.FromHtml(hex);
+
+    public static string Hex(Color c) => $"#{c.R:X2}{c.G:X2}{c.B:X2}";
+
+    public static bool TryParse(string? hex, out Color c)
+    {
+        c = Color.Empty;
+        if (string.IsNullOrWhiteSpace(hex)) return false;
+        string s = hex.Trim().TrimStart('#');
+        if (s.Length != 6 || !int.TryParse(s, System.Globalization.NumberStyles.HexNumber, null, out int v)) return false;
+        c = Color.FromArgb((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF);
+        return true;
+    }
+
+    public static readonly Theme Dark = new("dark", "暗色",
+        C("#16181D"), C("#12141A"), C("#1C1F26"), C("#101216"), C("#F4F4F5"), C("#9CA3AF"),
+        C("#2DD4BF"), C("#042F2E"), C("#2A2E36"), C("#22262E"), C("#16302E"), C("#F07178"));
+
+    public static readonly Theme Light = new("light", "亮色",
+        C("#F6F7F9"), C("#FFFFFF"), C("#FFFFFF"), C("#EEF1F4"), C("#1A1C1F"), C("#667085"),
+        C("#0F766E"), C("#FFFFFF"), C("#E4E7EC"), C("#E7F6F4"), C("#E6F4F1"), C("#DC2626"));
+
+    /// <summary>主题色可选的预设色块。</summary>
+    public static readonly Color[] Accents =
     [
-        Make("dark", "玄青", "#16181D", "#12141A", "#1C1F26", "#101216", "#F4F4F5", "#9CA3AF", "#2DD4BF", "#042F2E", "#2A2E36", "#22262E", "#16302E", "#F07178"),
-        Make("light", "月白", "#F6F7F9", "#FFFFFF", "#FFFFFF", "#EEF1F4", "#1A1C1F", "#667085", "#0F766E", "#FFFFFF", "#E4E7EC", "#E7F6F4", "#E6F4F1", "#DC2626"),
-        Make("nord", "霁青", "#2E3440", "#272C36", "#3B4252", "#242933", "#ECEFF4", "#D8DEE9", "#88C0D0", "#2E3440", "#434C5E", "#3B4252", "#3B4F5C", "#BF616A"),
-        Make("dracula", "紫檀", "#282A36", "#21222C", "#343746", "#1E1F29", "#F8F8F2", "#BFBFBF", "#BD93F9", "#282A36", "#44475A", "#343746", "#3A3450", "#FF5555"),
-        Make("catppuccin", "丁香", "#1E1E2E", "#181825", "#313244", "#11111B", "#CDD6F4", "#A6ADC8", "#CBA6F7", "#1E1E2E", "#45475A", "#313244", "#3B3454", "#F38BA8"),
-        Make("gruvbox", "赭石", "#282828", "#1D2021", "#3C3836", "#1D2021", "#EBDBB2", "#A89984", "#FE8019", "#1D2021", "#504945", "#3C3836", "#4A3424", "#FB4934"),
-        Make("tokyo", "靛蓝", "#1A1B26", "#16161E", "#24283B", "#13131A", "#C0CAF5", "#9AA5CE", "#7DCFFF", "#1A1B26", "#292E42", "#24283B", "#1A3344", "#F7768E"),
-        Make("onedark", "鸦青", "#282C34", "#21252B", "#2C313A", "#1B1E24", "#ABB2BF", "#7F848E", "#61AFEF", "#1B212B", "#3E4451", "#2C313A", "#243446", "#E06C75"),
-        Make("solarized", "秘色", "#002B36", "#073642", "#073642", "#00212B", "#EEE8D5", "#93A1A1", "#B58900", "#002B36", "#586E75", "#0A4050", "#12424A", "#DC322F"),
-        Make("github", "竹青", "#0D1117", "#010409", "#161B22", "#0D1117", "#E6EDF3", "#8B949E", "#3FB950", "#052E16", "#30363D", "#161B22", "#0F2A1A", "#F85149"),
-        Make("monokai", "胭脂", "#272822", "#1E1F1C", "#3E3D32", "#1E1F1C", "#F8F8F2", "#75715E", "#F92672", "#FFFFFF", "#49483E", "#3E3D32", "#4A2434", "#F92672"),
-        Make("rosepine", "海棠", "#191724", "#1F1D2E", "#26233A", "#13111C", "#E0DEF4", "#908CAA", "#EBBCBA", "#191724", "#403D52", "#26233A", "#3A2E38", "#EB6F92"),
-        Make("sunny", "杏黄", "#FFF4CC", "#FFE58A", "#FFFBEA", "#FFF0B3", "#3D2A00", "#8A6414", "#FF6A00", "#FFFFFF", "#F5D56A", "#FFE9A8", "#FFD59A", "#E11D48"),
-        Make("bubblegum", "桃红", "#FFE6F4", "#FFC6E4", "#FFF5FB", "#FFD4EC", "#4A1234", "#A24B78", "#FF2E93", "#FFFFFF", "#F5B3D6", "#FFD8EE", "#FFC2E4", "#BE123C"),
-        Make("lime", "柳绿", "#F3FFE4", "#E2F9C4", "#F9FFEF", "#DFF5B8", "#1C3A08", "#5A7A32", "#5BD100", "#143000", "#C8E89A", "#E7FBCF", "#D4F5A8", "#E11D48"),
-        Make("azure", "天蓝", "#E5F3FF", "#C9E6FF", "#F4FAFF", "#D4ECFF", "#062544", "#3A6A94", "#0066FF", "#FFFFFF", "#B5D7F5", "#D7EEFF", "#C4E2FF", "#E11D48"),
-        Make("violet", "雪青", "#F3E8FF", "#E4CCFF", "#FBF7FF", "#EDD9FF", "#2A0848", "#7A4E9A", "#7C3AED", "#FFFFFF", "#D4B4F5", "#EAD9FF", "#E0C8FF", "#E11D48"),
-        Make("coral", "朱红", "#FFE8E0", "#FFD0C2", "#FFF6F2", "#FFDDD2", "#4A160C", "#A85A48", "#FF3B1F", "#FFFFFF", "#F5C2B4", "#FFDDD4", "#FFD0C4", "#9F1239"),
-        Make("mango", "橘黄", "#FFF1D6", "#FFE0A8", "#FFF8EC", "#FFE8C2", "#3F2404", "#9A6230", "#FF8A00", "#3F2404", "#F6D39A", "#FFE7C0", "#FFD9A0", "#E11D48"),
-        Make("lagoon", "缥色", "#E7FFFB", "#C8F8F1", "#F4FFFD", "#D2F6F0", "#063832", "#3D7A70", "#00A99A", "#FFFFFF", "#B4E8E0", "#D6F8F2", "#C2F0E8", "#E11D48"),
+        C("#2DD4BF"), C("#0F766E"), C("#3B82F6"), C("#6366F1"), C("#8B5CF6"), C("#EC4899"),
+        C("#F43F5E"), C("#FE8019"), C("#F59E0B"), C("#84CC16"), C("#22C55E"), C("#64748B"),
     ];
 
-    public static Theme ById(string? id) => All.FirstOrDefault(t => t.Id == id) ?? All[0];
+    /// <summary>底色预设：暗色和亮色各几种冷暖。</summary>
+    public static readonly Color[] DarkBases = [C("#16181D"), C("#1E1E1E"), C("#282828"), C("#1A1B26"), C("#1E1E2E"), C("#0D1117"), C("#1B2421")];
+    public static readonly Color[] LightBases = [C("#F6F7F9"), C("#FFFFFF"), C("#FBF7F0"), C("#F3F6FB"), C("#F7F3FA"), C("#F2F7F2"), C("#FDF4F5")];
+
+    /// <summary>按存档设置得出配色：没自定义就是默认暗色 / 亮色。</summary>
+    public static Theme From(Prefs p)
+    {
+        var baseTheme = p.Theme == "light" ? Light : Dark;
+        bool hasBg = TryParse(p.Base, out var bg), hasAccent = TryParse(p.Accent, out var accent);
+        if (!hasBg && !hasAccent) return baseTheme;
+        if (!hasBg) return WithAccent(baseTheme, accent);
+        return Derive(bg, hasAccent ? accent : (Luma(bg) < 0.45f ? Dark.Accent : Light.Accent));
+    }
+
+    static Color TextOn(Color c) => Luma(c) > 0.55f ? Mix(Color.Black, c, 0.82f) : Color.White;
+
+    /// <summary>默认底色只换主题色：只动和主题色有关的几种颜色，其它保持原样。</summary>
+    static Theme WithAccent(Theme t, Color a) => t with
+    {
+        Id = "custom",
+        Name = "自定义",
+        Accent = a,
+        AccentText = TextOn(a),
+        Selected = Mix(a, t.Sidebar, t.IsDark ? 0.17f : 0.11f),
+        Hover = t.IsDark ? t.Hover : Mix(a, t.Sidebar, 0.08f),
+    };
+
+    /// <summary>从底色和主题色推出整套配色。</summary>
+    public static Theme Derive(Color bg, Color a)
+    {
+        if (Luma(bg) < 0.45f)
+        {
+            var sidebar = Shade(bg, -0.18f);
+            var text = Mix(Color.White, bg, 0.94f);
+            return new Theme("custom", "自定义", bg, sidebar, Shade(bg, 0.035f), Shade(bg, -0.28f),
+                text, Mix(text, bg, 0.6f), a, TextOn(a), Shade(bg, 0.09f), Shade(bg, 0.045f),
+                Mix(a, sidebar, 0.17f), C("#F07178"));
+        }
+        else
+        {
+            var sidebar = Shade(bg, 0.6f);
+            var text = Mix(C("#1A1C1F"), bg, 0.96f);
+            return new Theme("custom", "自定义", bg, sidebar, Shade(bg, 0.7f), Shade(bg, -0.03f),
+                text, Mix(text, bg, 0.62f), a, TextOn(a), Shade(bg, -0.075f), Mix(a, sidebar, 0.08f),
+                Mix(a, sidebar, 0.11f), C("#DC2626"));
+        }
+    }
+
+    /// <summary>1.2 以前的 20 套预设只剩底色和主题色，用来把老存档换成自定义配色，尽量保持原来的样子。</summary>
+    static readonly Dictionary<string, (string Bg, string Accent)> Legacy = new()
+    {
+        ["nord"] = ("#2E3440", "#88C0D0"), ["dracula"] = ("#282A36", "#BD93F9"), ["catppuccin"] = ("#1E1E2E", "#CBA6F7"),
+        ["gruvbox"] = ("#282828", "#FE8019"), ["tokyo"] = ("#1A1B26", "#7DCFFF"), ["onedark"] = ("#282C34", "#61AFEF"),
+        ["solarized"] = ("#002B36", "#B58900"), ["github"] = ("#0D1117", "#3FB950"), ["monokai"] = ("#272822", "#F92672"),
+        ["rosepine"] = ("#191724", "#EBBCBA"), ["sunny"] = ("#FFF4CC", "#FF6A00"), ["bubblegum"] = ("#FFE6F4", "#FF2E93"),
+        ["lime"] = ("#F3FFE4", "#5BD100"), ["azure"] = ("#E5F3FF", "#0066FF"), ["violet"] = ("#F3E8FF", "#7C3AED"),
+        ["coral"] = ("#FFE8E0", "#FF3B1F"), ["mango"] = ("#FFF1D6", "#FF8A00"), ["lagoon"] = ("#E7FFFB", "#00A99A"),
+    };
+
+    /// <summary>老存档的预设主题换成暗色/亮色 + 自定义颜色。改了返回 true。</summary>
+    public static bool Migrate(Prefs p)
+    {
+        if (p.Theme is "dark" or "light") return false;
+        if (Legacy.TryGetValue(p.Theme, out var old))
+        {
+            p.Base = old.Bg;
+            p.Accent = old.Accent;
+            p.Theme = Luma(C(old.Bg)) < 0.45f ? "dark" : "light";
+        }
+        else p.Theme = "dark";
+        return true;
+    }
 }

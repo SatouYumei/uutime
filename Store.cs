@@ -28,7 +28,14 @@ internal sealed class Prefs
 {
     /// <summary>无键鼠操作超过这么多分钟后，前台时间不再累计（计入后台）。0 表示不判断。</summary>
     public int IdleMinutes { get; set; } = 5;
+    /// <summary>"dark" 或 "light"（1.2 以前是 20 套预设的 id，加载时转换）。</summary>
     public string Theme { get; set; } = "dark";
+    /// <summary>自定义底色 #RRGGBB，null 用默认。</summary>
+    public string? Base { get; set; }
+    /// <summary>自定义主题色 #RRGGBB，null 用默认。</summary>
+    public string? Accent { get; set; }
+    /// <summary>有背景图时，盖在图上的底色遮罩浓度（百分比），越大图越淡、字越清楚。</summary>
+    public int BackdropDim { get; set; } = 72;
     /// <summary>定时检查新版本并推送通知。</summary>
     public bool CheckUpdates { get; set; } = true;
     public bool AutoMode { get; set; }
@@ -40,7 +47,7 @@ internal sealed class Prefs
 
     public Prefs Clone() => new()
     {
-        IdleMinutes = IdleMinutes, Theme = Theme, CheckUpdates = CheckUpdates, AutoMode = AutoMode,
+        IdleMinutes = IdleMinutes, Theme = Theme, Base = Base, Accent = Accent, BackdropDim = BackdropDim, CheckUpdates = CheckUpdates, AutoMode = AutoMode,
         AutoScope = AutoScope, ShowAutoToggle = ShowAutoToggle, Blocked = new(Blocked),
     };
 }
@@ -79,6 +86,8 @@ internal sealed class Backup
     public string Exported { get; set; } = "";
     public List<AppEntry>? Apps { get; set; }
     public Prefs? Prefs { get; set; }
+    /// <summary>背景图 JPEG 的 base64。</summary>
+    public string? Background { get; set; }
     public Dictionary<string, Dictionary<string, Stat>>? Usage { get; set; }
 }
 
@@ -134,6 +143,18 @@ internal sealed class Store
     public HashSet<string> Blocked { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     public string ProfileId => Settings.Profile;
+
+    /// <summary>当前存档的背景图（导入时已压缩好的 JPEG），没有为 null。</summary>
+    public string? Background => File.Exists(BackgroundFile(ProfileId)) ? BackgroundFile(ProfileId) : null;
+    static string BackgroundFile(string id) => System.IO.Path.Combine(ProfileDir(id), "background.jpg");
+
+    /// <summary>用已经压缩好的图片（Wallpaper.Import 的结果）作为当前存档的背景图。</summary>
+    public void SetBackground(string processed) => File.Copy(processed, BackgroundFile(ProfileId), true);
+
+    public void ClearBackground()
+    {
+        try { File.Delete(BackgroundFile(ProfileId)); } catch (IOException) { }
+    }
     public string ProfileName => profile.Name;
     public Prefs Prefs => profile.Prefs!;
     /// <summary>界面上显示的应用（和 Watched 一致）。</summary>
@@ -196,8 +217,11 @@ internal sealed class Store
             {
                 // 1.1 以前设置是全局的：补到这个存档里
                 profile.Prefs = new Prefs { IdleMinutes = Settings.IdleMinutes, Theme = Settings.Theme };
+                Theme.Migrate(profile.Prefs);
                 WriteAtomic(ProfileFile(id), JsonSerializer.Serialize(profile, JsonCtx.Default.Profile));
             }
+            else if (Theme.Migrate(profile.Prefs))
+                WriteAtomic(ProfileFile(id), JsonSerializer.Serialize(profile, JsonCtx.Default.Profile));
             RebuildWatched();
         }
     }
@@ -368,7 +392,9 @@ internal sealed class Store
         var prefs = Prefs.Clone();
         prefs.AutoMode = false;
         prefs.Blocked.Clear();
-        return CreateEmpty(name, null, prefs);
+        string id = CreateEmpty(name, null, prefs);
+        if (Background is { } bg) File.Copy(bg, BackgroundFile(id), true); // 背景图也沿用
+        return id;
     }
 
     public void RenameProfile(string id, string name)
@@ -405,11 +431,13 @@ internal sealed class Store
         if (id == ProfileId)
         {
             lock (sync) b = new Backup { Name = profile.Name, Apps = profile.Apps, Prefs = profile.Prefs, Usage = usage };
+            if (Background is { } bg) b.Background = Convert.ToBase64String(File.ReadAllBytes(bg));
         }
         else
         {
             var p = Read(ProfileFile(id), JsonCtx.Default.Profile) ?? new Profile();
             b = new Backup { Name = p.Name, Apps = p.Apps, Prefs = p.Prefs, Usage = Read(UsageFile(id), JsonCtx.Default.DictionaryStringDictionaryStringStat) ?? new() };
+            if (File.Exists(BackgroundFile(id))) b.Background = Convert.ToBase64String(File.ReadAllBytes(BackgroundFile(id)));
         }
         b.Format = BackupFormat;
         b.Version = 1;
@@ -435,7 +463,20 @@ internal sealed class Store
             name = baseName;
             for (int n = 2; names.Contains(name); n++) name = $"{baseName}{n}";
         }
+        if (b.Prefs != null) Theme.Migrate(b.Prefs);
         string id = CreateEmpty(name, b.Apps, b.Prefs);
+        if (b.Background != null)
+        {
+            // 备份里的图也重新走一遍导入检查，不直接信任文件内容
+            string tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"uutime-import-{Guid.NewGuid():N}");
+            try
+            {
+                File.WriteAllBytes(tmp, Convert.FromBase64String(b.Background));
+                Wallpaper.Import(tmp, BackgroundFile(id));
+            }
+            catch (FormatException) { }
+            finally { File.Delete(tmp); }
+        }
         WriteAtomic(UsageFile(id), JsonSerializer.Serialize(b.Usage ?? new(), Compact.DictionaryStringDictionaryStringStat));
         return id;
     }

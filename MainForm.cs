@@ -77,7 +77,11 @@ internal sealed class MainForm : ChromeForm
             tracker.Discovered -= OnDiscovered;
         }
         base.Dispose(disposing);
-        if (disposing) kit?.Dispose();
+        if (disposing)
+        {
+            kit?.Dispose();
+            Backdrop?.Dispose();
+        }
     }
 
     /// <summary>按当前主题和 DPI 重建整个界面。</summary>
@@ -86,7 +90,9 @@ internal sealed class MainForm : ChromeForm
         SuspendLayout();
         foreach (var c in Root.Controls.Cast<Control>().ToList()) c.Dispose();
         kit?.Dispose();
-        kit = new Kit(Theme.ById(store.Prefs.Theme), DeviceDpi);
+        kit = new Kit(Theme.From(store.Prefs), DeviceDpi);
+        Backdrop?.Dispose();
+        Backdrop = Backdrop.Load(store.Background, store.Prefs.BackdropDim);
         var t = kit.T;
         SetBack(t.Bg);
         CaptionHeight = S(56);
@@ -406,7 +412,8 @@ internal sealed class MainForm : ChromeForm
             }
             if (id == themes[0])
             {
-                ShowDialogPreview(new ThemePicker(f.kit, id), Path.Combine(outDir, $"{id}-themes.png"));
+                ShowDialogPreview(new AppearanceForm(f.kit, store), Path.Combine(outDir, $"{id}-appearance.png"));
+                ShowDialogPreview(new ColorPickerForm(f.kit, f.kit.T.Accent, "自定义主题色"), Path.Combine(outDir, $"{id}-color.png"));
                 ShowDialogPreview(new AddForm(f.kit, store.Watched), Path.Combine(outDir, $"{id}-add.png"));
                 ShowDialogPreview(new ProfileForm(f.kit, store, _ => { }, () => { }), Path.Combine(outDir, $"{id}-profiles.png"));
                 ShowDialogPreview(new SettingsForm(f.kit, store, () => { }), Path.Combine(outDir, $"{id}-settings.png"));
@@ -486,12 +493,13 @@ internal sealed class MainForm : ChromeForm
     {
         tracker.Flush();
         store.Save();
+        string before = store.ProfileId;
         using var dlg = new ProfileForm(kit, store, SwitchProfile, tracker.Flush);
         dlg.NameChanged += UpdateProfileButton;
         dlg.ShowDialog(this);
         UpdateProfileButton();
-        // 设置跟着存档走：换了存档可能换了主题，对话框关了再重建
-        if (kit.T.Id != store.Prefs.Theme)
+        // 外观跟着存档走：换了存档就按新存档的配色和背景图重建（对话框关了再建，它还在用旧的 kit）
+        if (store.ProfileId != before)
         {
             Build();
             ThemeChanged?.Invoke();

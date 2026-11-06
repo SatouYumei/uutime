@@ -21,6 +21,23 @@ internal static class Program
             MainForm.RenderPreviews(store, tracker, icon, args[render + 1], themes);
             return;
         }
+        int wallpaper = Array.IndexOf(args, "--wallpaper");
+        if (wallpaper >= 0)
+        {
+            // --wallpaper <结果文件> <图片>...：逐张走一遍背景图导入，记下结果
+            var log = new List<string>();
+            foreach (string src in args[(wallpaper + 2)..])
+            {
+                string dest = Path.Combine(Path.GetTempPath(), $"uutime-wp-{Guid.NewGuid():N}.jpg");
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                string? err = Wallpaper.Import(src, dest);
+                log.Add($"{Path.GetFileName(src)} ({new FileInfo(src).Length / 1024} KB): " +
+                    (err ?? $"ok {Wallpaper.Describe(dest)} in {sw.ElapsedMilliseconds}ms"));
+                File.Delete(dest);
+            }
+            File.WriteAllLines(args[wallpaper + 1], log);
+            return;
+        }
         int autotest = Array.IndexOf(args, "--autotest");
         if (autotest >= 0)
         {

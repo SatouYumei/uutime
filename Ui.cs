@@ -312,6 +312,9 @@ internal class ChromeForm : Form
     struct RECT { public int Left, Top, Right, Bottom; }
 
     public int CaptionHeight { get; set; }
+
+    /// <summary>背景图（只有主窗口会设）。各面板据此画图再盖底色。</summary>
+    public Backdrop? Backdrop { get; protected set; }
     public bool Resizable { get; set; } = true;
 
     /// <summary>
@@ -469,6 +472,12 @@ internal class Surface : Panel
         SetStyle(ControlStyles.ResizeRedraw, true);
     }
 
+    protected override void OnPaintBackground(PaintEventArgs e)
+    {
+        if ((FindForm() as ChromeForm)?.Backdrop is { } b) b.Paint(e.Graphics, this, BackColor);
+        else base.OnPaintBackground(e);
+    }
+
     protected override void WndProc(ref Message m)
     {
         if (!Hit.PassToForm(this, ref m)) base.WndProc(ref m);
@@ -512,7 +521,8 @@ internal class Flat : Control
 
     protected override void OnPaint(PaintEventArgs e)
     {
-        e.Graphics.Clear(Back);
+        if ((FindForm() as ChromeForm)?.Backdrop is { } b) b.Paint(e.Graphics, this, Back);
+        else e.Graphics.Clear(Back);
         Gfx.Hq(e.Graphics);
         Draw(e.Graphics);
     }
@@ -742,20 +752,27 @@ internal sealed class Toggle : Flat
 /// <summary>− 数值 + 的步进器。</summary>
 internal sealed class Stepper : Flat
 {
-    readonly int min, max;
+    readonly int min, max, step;
     readonly Func<int, string> format;
     int value;
     int hoverPart; // -1 减，1 加
 
     public event Action<int>? ValueChanged;
 
-    public Stepper(Kit kit, Color back, int value, int min, int max, Func<int, string> format) : base(kit, back)
+    public Stepper(Kit kit, Color back, int value, int min, int max, Func<int, string> format, int step = 1) : base(kit, back)
     {
         this.min = min;
         this.max = max;
+        this.step = step;
         this.format = format;
         this.value = Math.Clamp(value, min, max);
         Size = new Size(S(112), S(30));
+    }
+
+    public int Value
+    {
+        get => value;
+        set { this.value = Math.Clamp(value, min, max); Invalidate(); }
     }
 
     int PartAt(int x) => x < S(30) ? -1 : x >= Width - S(30) ? 1 : 0;
@@ -776,7 +793,7 @@ internal sealed class Stepper : Flat
     protected override void OnMouseDown(MouseEventArgs e)
     {
         int p = PartAt(e.X);
-        int next = Math.Clamp(value + p, min, max);
+        int next = Math.Clamp(value + p * step, min, max);
         if (p != 0 && next != value)
         {
             value = next;

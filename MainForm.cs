@@ -395,6 +395,8 @@ internal sealed class MainForm : ChromeForm
     }
 
 #if DEBUG
+    internal string UpdateButtonText => $"{updateBtn.Text} enabled={updateBtn.Enabled}";
+
     /// <summary>开发用：不显示窗口，直接把各主题、各页面画成图片，检查界面。</summary>
     public static void RenderPreviews(Store store, Tracker tracker, Icon icon, string outDir, string[] themes)
     {

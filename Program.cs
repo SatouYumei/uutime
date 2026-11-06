@@ -21,6 +21,28 @@ internal static class Program
             MainForm.RenderPreviews(store, tracker, icon, args[render + 1], themes);
             return;
         }
+        int busytest = Array.IndexOf(args, "--busytest");
+        if (busytest >= 0)
+        {
+            // --busytest <结果文件>：不经过按钮直接检查更新（和启动后自动检查一样），看按钮最后是不是恢复了
+            ApplicationConfiguration.Initialize();
+            var store = Store.Load();
+            using var tracker = new Tracker(store);
+            using var icon = AppIcon.Create();
+            using var updater = new Updater(() => { }, () => false, _ => { });
+            MainForm.PreviewMode = true;
+            using var f = new MainForm(store, tracker, icon, updater) { StartPosition = FormStartPosition.Manual, Location = new Point(-30000, -30000), ShowInTaskbar = false };
+            f.Show();
+            var log = new List<string> { "before: " + f.UpdateButtonText };
+            var task = updater.CheckAsync();
+            log.Add("during: " + f.UpdateButtonText);
+            while (!task.IsCompleted) { Application.DoEvents(); Thread.Sleep(20); }
+            Application.DoEvents();
+            log.Add($"after: {f.UpdateButtonText} status={updater.Status}");
+            f.Close();
+            File.WriteAllLines(args[busytest + 1], log);
+            return;
+        }
         int wallpaper = Array.IndexOf(args, "--wallpaper");
         if (wallpaper >= 0)
         {

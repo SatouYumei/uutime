@@ -164,6 +164,7 @@ internal sealed class Updater : IDisposable
     {
         if (Busy) return;
         Busy = true;
+        Changed?.Invoke(); // 启动后自动检查时界面也显示「检查中…」
         try
         {
             using var http = Client();
@@ -180,6 +181,7 @@ internal sealed class Updater : IDisposable
         finally
         {
             Busy = false;
+            Changed?.Invoke(); // 结果文字在 Busy 还是 true 时就通知过了，按钮要再刷新一次
         }
     }
 
@@ -225,6 +227,7 @@ internal sealed class Updater : IDisposable
         finally
         {
             Busy = false;
+            Changed?.Invoke(); // 结果文字在 Busy 还是 true 时就通知过了，按钮要再刷新一次
         }
     }
 }
